@@ -185,7 +185,7 @@ function BinaryStream(arrayBuffer, bigEndian){
     obj.buffer = arrayBuffer;
     obj.dataView = new DataView(arrayBuffer);
     obj.length = arrayBuffer.byteLength;
+    return obj;
   }
 
-	return obj;
 }

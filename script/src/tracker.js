@@ -1913,6 +1913,19 @@ var Tracker = (function(){
 			console.log("extracting zip file");
 
 			if (UI) UI.setStatus("Extracting Zip file",true);
+			// using UZIP: https://github.com/photopea/UZIP.js
+			if (typeof UZIP !== "undefined") {
+				var myArchive = UZIP.parse(arrayBuffer);
+				console.log(myArchive);
+				for (var name in myArchive) {
+					me.processFile(myArchive[name].buffer, name, next);
+					break; // just use first entry
+				}
+			} else {
+				console.error("no ZIP library found");
+				return false;
+			}
+			/* old ZIP lib, but with worker possibility
 			zip.workerScriptsPath = "script/src/lib/zip/";
 			zip.useWebWorkers = Host.useWebWorkers;
 
@@ -1945,6 +1958,7 @@ var Tracker = (function(){
 				console.error("Zip file could not be read ...");
 				if (next) next(false);
 			});
+			*/
 		}
 
 		if (result.isMod && result.loader){

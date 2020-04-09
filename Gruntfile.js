@@ -65,6 +65,13 @@ module.exports = function(grunt) {
 
                 ],
                 dest: 'player/bassoonplayer.js'
+            },
+            uzip:{
+                src: [
+                    'player/bassoonplayer-min.js',
+                    'script/src/lib/UZIP.pack_20200308.js'
+                ],
+                dest: 'player/bassoonplayer-zip.js'
             }
         },
         uglify: {
@@ -238,7 +245,7 @@ module.exports = function(grunt) {
     // Default task(s).
     // note:  use concat before uglify to keep the order of the JS files
     grunt.registerTask('bassoontracker', ['replace:buildnumber','replace:versioncheck','concat:tracker','uglify:tracker','clean:tracker']);
-    grunt.registerTask('player', ['concat:player','uglify:player']);
+    grunt.registerTask('player', ['concat:player','uglify:player','concat:uzip']);
     grunt.registerTask('default', ['bassoontracker']);
     grunt.registerTask('sprites', ['sprite']);
     grunt.registerTask('friend', ['clean:friend','concat:friend','uglify:friend','copy:friend','replace:friend','replace:friendpackage','clean:friendjs']);
