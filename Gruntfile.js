@@ -69,7 +69,7 @@ module.exports = function(grunt) {
             uzip:{
                 src: [
                     'player/bassoonplayer-min.js',
-                    'script/src/lib/UZIP.pack_20200308.js'
+                    'script/src/lib/UZIP.depacker_pack_20200308.js'
                 ],
                 dest: 'player/bassoonplayer-zip.js'
             }
