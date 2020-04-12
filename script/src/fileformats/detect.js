@@ -13,13 +13,15 @@ var FileDetector = function(){
 
 	me.detect = function(file,name){
 		var length = file.length;
-		var id = "";
 
+		var zipId = file.readString(2,0);
+		if (zipId == "PK") return fileType.zip;
+
+		var id = "";
 		id = file.readString(17,0);
 		if (id == "Extended Module: "){
 			return fileType.mod_FastTracker;
 		}
-
 
 		if (length>1100){
 			id = file.readString(4,1080); // M.K.
@@ -55,8 +57,6 @@ var FileDetector = function(){
 		if (ext == ".iff") return fileType.sample;
 		if (ext == ".zip") return fileType.zip;
 
-		var zipId = file.readString(2,0);
-		if (zipId == "PK") return fileType.zip;
 
 
 
