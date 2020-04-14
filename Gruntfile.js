@@ -74,15 +74,21 @@ module.exports = function(grunt) {
                 dest: 'player/bassoonplayer-zip.js'
             }
         },
+        run: {
+            options: {
+                cwd: "player"
+            },
+            your_target: {
+                cmd: 'node',
+                args: [
+                    'squeeze.js'
+                ]
+            }
+        },
         uglify: {
             options: {
-                mangle: {
-                    toplevel:false
-                },
-                mangleProperties: false,
-                exceptionsFiles: [ 'GruntMangleExceptions.json'],
-                nameCache: 'grunt-uglify-cache.json',
                 banner: '/*<%= pkg.name %> v<%= pkg.version %> by <%= pkg.author %> - ' + 'build <%= grunt.template.today("yyyy-mm-dd") %> - Full source on <%= pkg.repository %> */',
+                mangle: {},
                 compress: {
                     sequences     : true,  // join consecutive statemets with the “comma operator”
                     properties    : true,  // optimize property access: a["foo"] → a.foo
@@ -101,11 +107,12 @@ module.exports = function(grunt) {
                     if_return     : true,  // optimize if-s followed by return/continue
                     join_vars     : true,  // join var declarations
                     side_effects  : true,  // drop side-effect-free statements
-                    warnings      : true,  // warn about potentially dangerous optimizations/code
                     global_defs   : {},
                     pure_getters  : true
                 },
-                beautify: false
+                beautify: false,
+                report: 'gzip',
+                sourceMap: false
             },
             tracker:{
                 files: {
@@ -120,6 +127,11 @@ module.exports = function(grunt) {
             player:{
                 files: {
                     'player/bassoonplayer-min.js': ['player/bassoonplayer.js']
+                }
+              },
+            playerSqueezed:{
+                files: {
+                    'player/b-min.js': ['player/bassoonplayer_squeezed.js']
                 }
             }
         },
@@ -240,15 +252,18 @@ module.exports = function(grunt) {
     grunt.loadNpmTasks('grunt-contrib-copy');
     grunt.loadNpmTasks('grunt-text-replace');
     grunt.loadNpmTasks('grunt-spritesmith');
+    grunt.loadNpmTasks('grunt-run');
 
 
     // Default task(s).
     // note:  use concat before uglify to keep the order of the JS files
-    grunt.registerTask('bassoontracker', ['replace:buildnumber','replace:versioncheck','concat:tracker','uglify:tracker','clean:tracker']);
-    grunt.registerTask('player', ['concat:player','uglify:player','concat:uzip']);
-    grunt.registerTask('default', ['bassoontracker']);
+    grunt.registerTask('tracker', ['replace:buildnumber','replace:versioncheck','concat:tracker','uglify:tracker','clean:tracker']);
+    grunt.registerTask('player', ['concat:player','uglify:player']);
+    grunt.registerTask('miniplayer', ['concat:player','run','uglify:playerSqueezed']);
+    grunt.registerTask('default', ['tracker']);
     grunt.registerTask('sprites', ['sprite']);
     grunt.registerTask('friend', ['clean:friend','concat:friend','uglify:friend','copy:friend','replace:friend','replace:friendpackage','clean:friendjs']);
-    grunt.registerTask('all', ['bassoontracker','player','friend']);
+    grunt.registerTask('all', ['tracker','player','friend']);
 
+    grunt.registerTask('bundle', ['player','concat:uzip']);
 };

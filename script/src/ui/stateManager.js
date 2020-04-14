@@ -2,8 +2,8 @@ var StateManager = function(){
 	var me = {};
 	var editHistory = {};
 	var maxHistory = 50;
-
-
+	
+	
 	me.registerEdit = function(action){
 		var id = action.target + "_" + action.id;
 		var history = editHistory[id] || {undo:[],redo:[]};
@@ -14,8 +14,8 @@ var StateManager = function(){
 
 		console.error(editHistory);
 	};
-
-
+	
+	
 	me.undo = function(){
 		var currentPattern = Tracker.getCurrentPattern();
 		var id = EDITACTION.PATTERN + "_" + currentPattern;
@@ -23,9 +23,9 @@ var StateManager = function(){
 		if(actionList && actionList.undo && actionList.undo.length){
 			var action = actionList.undo.pop();
 			var patternData = Tracker.getSong().patterns[currentPattern];
-
+			
 			console.warn(action);
-
+			
 			switch (action.type) {
 				case EDITACTION.NOTE:
 				case EDITACTION.TRACK:
@@ -43,7 +43,7 @@ var StateManager = function(){
 			actionList.redo.push(action);
 		}
 	};
-
+	
 	me.redo = function(){
 		var currentPattern = Tracker.getCurrentPattern();
 		var id = EDITACTION.PATTERN + "_" + currentPattern;
@@ -70,8 +70,8 @@ var StateManager = function(){
 			actionList.undo.push(action);
 		}
 	};
-
-
+	
+	
 	me.createNoteUndo = function(pattern,track,row,note){
 		return {
 			target: EDITACTION.PATTERN,
@@ -104,7 +104,7 @@ var StateManager = function(){
 			data:[]
 		};
 	};
-
+	
 	me.addNote = function(actionList,track,row,note){
 		var noteInfo = {
 			position:{
@@ -116,6 +116,6 @@ var StateManager = function(){
 		actionList.data.push(noteInfo);
 		return noteInfo;
 	};
-
+	
 	return me;
 }();
