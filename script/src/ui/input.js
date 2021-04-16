@@ -21,12 +21,13 @@ var Input = (function(){
 	var prevIndex = 13;
 
 	me.init = function(){
-
+		
 		// mouse, touch and key handlers
 
 		canvas.addEventListener("mousedown",handleTouchDown,false);
 		canvas.addEventListener("mousemove",handleTouchMove,false);
 		canvas.addEventListener("mouseup",handleTouchUp,false);
+		canvas.addEventListener("mouseout",handleTouchOut,false);
 
 		canvas.addEventListener("touchstart", handleTouchDown,false);
 		canvas.addEventListener("touchmove", handleTouchMove,false);
@@ -51,6 +52,7 @@ var Input = (function(){
 		window.addEventListener("paste", handlePaste,false);
 		window.addEventListener("copy", handleCopy,false);
 		window.addEventListener("cut", handleCut,false);
+		window.addEventListener("undo", handleUndo,false);
 		window.addEventListener("delete", handleDelete,false);
 
 		if (!App.isPlugin) window.addEventListener("resize",handleResize,false);
@@ -104,7 +106,7 @@ var Input = (function(){
 				}
 				
 				if (currentEventTarget && focusElement && focusElement.deActivate && focusElement.name !== currentEventTarget.name){
-					focusElement.deActivate();
+					focusElement.deActivate(currentEventTarget);
 				}
 				
 				var touchX = currentEventTarget? currentEventTarget.eventX : x ;
@@ -192,6 +194,7 @@ var Input = (function(){
 					}
 				}
 			}
+			
 		}
 
 		function handleTouchUp(event){
@@ -252,6 +255,13 @@ var Input = (function(){
 
 		}
 
+
+		function handleTouchOut(event){
+			if (touchData.isTouchDown){
+				handleTouchUp(event);
+			}
+		}
+
 		function handleKeyDown(event){
 			
 			event.preventDefault();
@@ -260,6 +270,8 @@ var Input = (function(){
 
 			var keyCode = event.keyCode;
 			var key = event.key;
+			//console.error(event.code);
+			//TODO use event.code as this is device independent.
 
 			var meta={
 				shift: event.shiftKey,
@@ -277,7 +289,7 @@ var Input = (function(){
 			}
 
 			//console.log(keyCode);
-
+			//ole.log(prevHoverTarget);
 			if (focusElement && focusElement.onKeyDown){
 				var handled = focusElement.onKeyDown(keyCode,event);
 				if (handled) return;
@@ -400,12 +412,11 @@ var Input = (function(){
                     return;
             }
 
-
 			if (key && (keyCode>40) && (keyCode<230)){
 
 				if (isMetaKeyDown && keyCode>=65 && keyCode<=90){
 					// A-Z with shift key
-					console.log("meta " + keyCode);
+					//console.log("meta " + keyCode);
 
 					event.stopPropagation();
 					event.preventDefault();
@@ -423,7 +434,7 @@ var Input = (function(){
 						case 88: //x - cut
 							UI.cutSelection(true);
 							return;
-						case 89: //z - redo
+						case 89: //y - redo
 							EventBus.trigger(EVENT.commandRedo);
 							return;
 						case 90: //z - undo
@@ -476,6 +487,7 @@ var Input = (function(){
 
 
 		function handleMouseWheel(event){
+			event.preventDefault();
 			if (touchData.currentMouseX){
 
 				var x = touchData.currentMouseX;
@@ -538,8 +550,13 @@ var Input = (function(){
 		}
 
 		function handleCut(e) {
+			console.error("cut");
 			UI.cutSelection(true);
 		}
+		function handleUndo(e) {
+			console.error("undo");
+		}
+
 
 		function handleDelete(e) {
 			console.error("delete");
@@ -565,16 +582,41 @@ var Input = (function(){
 
 
 	me.setFocusElement = function(element){
-		if (focusElement && focusElement.deActivate) focusElement.deActivate();
-		focusElement = element;
-
 		var name = element.name || element.type;
-		if (name) console.log("setting focus to " + name);
+		if (focusElement){
+			var fName = focusElement.name || focusElement.type;
+			if (fName === name){
+				console.log(name + " already has focus");
+				return;
+			}else{
+				if (focusElement.deActivate) focusElement.deActivate()
+			}
+		}
+		focusElement = element;
+		if (name){
+			console.log("setting focus to " + name);
+		}else{
+			console.warn("Warning: setting focus to an unnamed element can cause unexpected results")
+		}
+		//if (element.activate) element.activate();
 	};
-	me.clearFocusElement = function(){
-		if (focusElement && focusElement.deActivate) focusElement.deActivate();
-		focusElement = undefined;
+	me.clearFocusElement = function(element){
+		if (element){
+			if (!element.name) console.warn("Please specify a name for the target object when removing focus");
+			var name = element.name || element.type;
+			if (name) console.log("removing focus from " + name);
+			if (element.deActivate) element.deActivate();
+			if (focusElement && focusElement.name === element.name){
+				focusElement = undefined;
+			}
+		}else{
+			if (focusElement && focusElement.deActivate) focusElement.deActivate();
+			focusElement = undefined;
+		}
 	};
+	me.getFocusElement = function(){
+		return focusElement;
+	}
 
 
 	function clearInputNote(){
@@ -607,7 +649,7 @@ var Input = (function(){
 	};
 
 	// handles the input for an indexed note
-	me.handleNoteOn = function(index,key,offset){
+	me.handleNoteOn = function(index,key,offset,volume){
 
         var note;
         var doPlay = true;
@@ -664,7 +706,7 @@ var Input = (function(){
                     if (Tracker.inFTMode() && Editor.getCurrentTrackPosition() === 5){
                         // Special Fasttracker commands // should we allow all keys ?
                         re = /[0-9A-Za-z]/g;
-                        if (re.test(key)) value = parseInt(key,36)
+                        if (re.test(key)) value = parseInt(key,36);
                     }
                 }
 
@@ -699,7 +741,8 @@ var Input = (function(){
             }else{
                 if (keyDown[index]) return;
                 if (note){
-                    Editor.putNote(Tracker.getCurrentInstrumentIndex(),note.period,note.index);
+                    Editor.putNote(Tracker.getCurrentInstrumentIndex(),note.period,note.index,volume);
+                    
                     if (Tracker.isPlaying()){
                         //doPlay = false;
                     }else{
@@ -734,16 +777,18 @@ var Input = (function(){
 						}
 					}
 				}
-
-                keyDown[index] = instrument.play(note.index,note.period,undefined,undefined,effects);
+                
+				// volume is 100 based here ... TODO: align volume to or 64 or 100 everywhere;
+                if (typeof volume === "number") volume = 100 * volume/64;
+                keyDown[index] = instrument.play(note.index,note.period,volume,undefined,effects);
                 keyDown[index].instrument = instrument;
                 keyDown[index].isKey = true;
                 inputNotes.push(keyDown[index]);
 
-				var note = keyDown[index];
-                if (note.scheduled && note.scheduled.vibrato){
-					var scheduledtime = instrument.scheduleAutoVibrato(note,2);
-					note.scheduled.vibrato += scheduledtime;
+				var playedNote = keyDown[index];
+                if (playedNote.scheduled && playedNote.scheduled.vibrato){
+					var scheduledtime = instrument.scheduleAutoVibrato(playedNote,2);
+					playedNote.scheduled.vibrato += scheduledtime;
 				}
 
                 if (inputNotes.length>64){
@@ -752,12 +797,10 @@ var Input = (function(){
                 EventBus.trigger(EVENT.pianoNoteOn,index);
             }
         }
-
-
-
+        
 	};
 
-	me.handleNoteOff = function(index){
+	me.handleNoteOff = function(index,register){
 		if (!SETTINGS.sustainKeyboardNotes && keyDown[index] && keyDown[index].source && Audio.context){
             EventBus.trigger(EVENT.pianoNoteOff,index);
             try{
@@ -771,6 +814,12 @@ var Input = (function(){
             }
         }
         keyDown[index] = false;
+		
+		if (register && Tracker.inFTMode() && Tracker.isRecording() && Tracker.isPlaying()){
+			// register Note-Off commands coming from midi
+			Editor.putNoteParam(5,20);
+			Editor.putNoteParam(7,1);
+		}
 	};
 
 	me.isMetaKeyDown = function(){

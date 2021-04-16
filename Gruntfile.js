@@ -19,6 +19,7 @@ module.exports = function(grunt) {
                     'script/src/ui/main.js',
                     'script/src/ui/**/*.js',
                     'script/src/**/*.js',
+                    'script/plugins/loader.js',
                     'script/wrapper/end.txt'
                 ],
                 dest: 'script/bassoontracker.js'
@@ -66,13 +67,18 @@ module.exports = function(grunt) {
                 ],
                 dest: 'player/bassoonplayer.js'
             },
-            uzip:{
+            bundle: {
+                options: {
+                    separator: ''
+                },
                 src: [
-                    'player/bassoonplayer-min.js',
-                    'script/src/lib/UZIP.depacker_pack_20200308.js'
+                    'script/src/lib/UZIP.depacker_pack_20200308.js',
+                    'script/wrapper/bundle0.js',
+                    'script/b.b64',
+                    'script/wrapper/bundle1.js',
                 ],
-                dest: 'player/bassoonplayer-zip.js'
-            }
+                dest: 'player/b-zip.js'
+              },
         },
         run: {
             options: {
@@ -128,7 +134,7 @@ module.exports = function(grunt) {
                 files: {
                     'player/bassoonplayer-min.js': ['player/bassoonplayer.js']
                 }
-              },
+            },
             playerSqueezed:{
                 files: {
                     'player/b-min.js': ['player/bassoonplayer_squeezed.js']
@@ -158,6 +164,11 @@ module.exports = function(grunt) {
                     {src: ['skin/screenshot3.png'], dest: 'hosts/FriendOs/build/data/preview.png'}
                 ],
             },
+            regpack: {
+                files: [
+                    {src: ['script/b'], dest: 'player/b-pack.js'}
+                ]
+            }
         },
         clean: {
             tracker: ['script/bassoontracker.js','player/bassoonplayer.js'],
@@ -225,8 +236,8 @@ module.exports = function(grunt) {
                     'skin/src/*.png',
                     'skin/src/icons_small/*.png'
                 ],
-                dest: 'skin/spritesheet_v2.png',
-                destCss: 'skin/spritemap_v2.json',
+                dest: 'skin/spritesheet_v4.png',
+                destCss: 'skin/spritemap_v4.json',
                 cssTemplate: function (data) {
 
                     var result = [];
@@ -243,6 +254,36 @@ module.exports = function(grunt) {
                     return JSON.stringify(result,undefined,2);
                 }
             }
+        },
+        regpack: {
+            pack: {
+                options: {
+                    globalVariables: '',
+                    separator: ''
+                },
+                files: [
+                    { src: ['player/b-min.js'], dest: 'script/b'}
+                ]
+            }
+        },
+        compress: {
+            main: {
+                options: {
+                    mode: 'zip',
+                    level: 9,
+                    archive: 'script/b.zip'
+                },
+                files: [
+                    {expand: true, src: ['b'], cwd: 'script/', dest: '/'}
+                ]
+            }
+        },
+        base64: {
+            target: {
+                files: {
+                    'script/b.b64': ['script/b.zip']
+                },
+            }
         }
     });
 
@@ -253,10 +294,14 @@ module.exports = function(grunt) {
     grunt.loadNpmTasks('grunt-text-replace');
     grunt.loadNpmTasks('grunt-spritesmith');
     grunt.loadNpmTasks('grunt-run');
+    grunt.loadNpmTasks('grunt-regpack');
+    grunt.loadNpmTasks('grunt-contrib-compress');
+    grunt.loadNpmTasks('grunt-base64');
 
 
     // Default task(s).
     // note:  use concat before uglify to keep the order of the JS files
+    grunt.registerTask('wrap', ['replace:buildnumber','replace:versioncheck','concat:tracker']);
     grunt.registerTask('tracker', ['replace:buildnumber','replace:versioncheck','concat:tracker','uglify:tracker','clean:tracker']);
     grunt.registerTask('player', ['concat:player','uglify:player']);
     grunt.registerTask('miniplayer', ['concat:player','run','uglify:playerSqueezed']);
@@ -264,6 +309,6 @@ module.exports = function(grunt) {
     grunt.registerTask('sprites', ['sprite']);
     grunt.registerTask('friend', ['clean:friend','concat:friend','uglify:friend','copy:friend','replace:friend','replace:friendpackage','clean:friendjs']);
     grunt.registerTask('all', ['tracker','player','friend']);
-
-    grunt.registerTask('bundle', ['player','concat:uzip']);
+    grunt.registerTask('bundle', ['miniplayer', 'regpack:pack','copy:regpack','compress','base64','concat:bundle']);
+    
 };

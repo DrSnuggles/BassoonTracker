@@ -90,6 +90,7 @@ UI.app_controlPanel = function(){
 		height: 20,
 		textAlign: "right"
 	});
+	labelTrackerMode.ignoreEvents = true;
 	me.addChild(labelTrackerMode);
 
 	var labelTrackView = UI.label();
@@ -107,6 +108,7 @@ UI.app_controlPanel = function(){
 		height: 20,
 		textAlign: "right"
 	});
+	labelTrackView.ignoreEvents = true;
 	me.addChild(labelTrackView);
 
 
@@ -117,6 +119,9 @@ UI.app_controlPanel = function(){
 		max: 32,
 		min:2,
 		size: "big",
+		padLength: 2,
+		trackUndo: true,
+		undoLabel: "Change Track count",
 		onChange : function(value){Tracker.setTrackCount(value)}
 	});
 	me.addChild(trackCountSpinbox);

@@ -4,6 +4,9 @@ var App = (function(){
     me.buildNumber = (typeof buildNumber === "undefined") ? "" : buildNumber; 
     
     me.init = function(){
+    	
+		if (typeof Midi === "object" && SETTINGS && SETTINGS.midi && SETTINGS.midi!=="disabled") Midi.init();
+    	
         EventBus.on(EVENT.command,function(command){
             window.focus();
             
@@ -66,7 +69,7 @@ var App = (function(){
 
                     var version = Host.getVersionNumber();
                     var build = Host.getBuildNumber();
-                    dialog.setText("BassoonTracker//Old School Amiga MOD and XM tracker/in plain javascript//©2017-2020 by Steffest//version " + version + "//Fork me on Github!");
+                    dialog.setText("BassoonTracker//Old School Amiga MOD and XM tracker/in plain javascript//©2017-2021 by Steffest//version " + version + "//Fork me on Github!");
 
                     UI.setModalElement(dialog);
                     break;
@@ -110,6 +113,25 @@ var App = (function(){
 					break;
 				case COMMAND.pattern2Sample:
 					Editor.renderTrackToBuffer();
+					break;
+                case COMMAND.undo:
+                    EventBus.trigger(EVENT.commandUndo);
+                    break;
+                case COMMAND.redo:
+                    EventBus.trigger(EVENT.commandRedo);
+                    break;
+				case COMMAND.nibbles:
+					Plugin.load("Nibbles",function(){
+						Nibbles.init({
+                            UI:UI,
+                            Input: Input,
+                            Y: Y,
+                            EventBus: EventBus,
+                            EVENT: EVENT,
+                            COMMAND: COMMAND,
+                            Layout: Layout
+                        });
+					});
 					break;
             }
         });

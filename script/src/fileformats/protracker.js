@@ -3,7 +3,7 @@ var ProTracker = function(){
 
 	me.load = function(file,name){
 
-		Tracker.setTrackerMode(TRACKERMODE.PROTRACKER);
+		Tracker.setTrackerMode(TRACKERMODE.PROTRACKER,true);
         Tracker.useLinearFrequency = false;
         Tracker.clearInstruments(31);
 
@@ -50,6 +50,7 @@ var ProTracker = function(){
 
 			instrument.sample.length = instrument.sample.realLen = sampleLength << 1;
 			var finetune = file.readUbyte();
+			if (finetune>16) finetune = finetune%16;
 			if (finetune>7) finetune -= 16;
 			instrument.setFineTune(finetune);
 			instrument.sample.volume   = file.readUbyte();
@@ -63,9 +64,11 @@ var ProTracker = function(){
 			sampleDataOffset += instrument.sample.length;
 			instrument.setSampleIndex(0);
 			Tracker.setInstrument(i,instrument);
+
 			
 		}
 		song.instruments = Tracker.getInstruments();
+
 
 		file.goto(950);
 		song.length = file.readUbyte();
@@ -201,19 +204,24 @@ var ProTracker = function(){
 
 		fileSize += ((highestPattern+1)* (trackCount * 256));
 
-		instruments.forEach(function(instrument){
-			if (instrument){
+		if (Tracker.getInstruments().length>32){
+			UI.showDialog("WARNING !!!//This file has more than 31 instruments.//Only the first 31 instruments will be included.");
+		}
+		var startI = 1;
+		var endI = 31;
+		var i;
 
+		for (i = startI;i<=endI;i++){
+			var instrument = instruments[i];
+			if (instrument){
 				// reset to first sample in case we come from a XM file
 				instrument.setSampleIndex(0);
-
 				fileSize += instrument.sample.length;
 			}else{
 				// +4 ?
 			}
-		});
+		}
 
-		var i;
 		var arrayBuffer = new ArrayBuffer(fileSize);
 		var file = new BinaryStream(arrayBuffer,true);
 
@@ -221,9 +229,9 @@ var ProTracker = function(){
 		file.writeStringSection(song.title,20);
 
 		// write instrument data
-		instruments.forEach(function(instrument){
+		for (i = startI;i<=endI;i++){
+			var instrument = instruments[i];
 			if (instrument){
-
 				// limit instrument size to 128k
 				//TODO: show a warning when this is exceeded ...
 				instrument.sample.length = Math.min(instrument.sample.length, 131070); // = FFFF * 2
@@ -237,7 +245,8 @@ var ProTracker = function(){
 			}else{
 				file.clear(30);
 			}
-		});
+		}
+
 
 		file.writeUByte(song.length);
 		file.writeUByte(127);
@@ -254,46 +263,50 @@ var ProTracker = function(){
 
 		for (i=0;i<=highestPattern;i++){
 
-			// TODO: patternData
-			//file.clear(1024);
-
 			var patternData = song.patterns[i];
 
-			// TODO - should be patternLength of pattnern;
+			// TODO - should be patternLength of pattern;
 			for (var step = 0; step<patternLength; step++){
 				var row = patternData[step];
 				for (var channel = 0; channel < trackCount; channel++){
-					var trackStep = row[channel];
-					var uIndex = 0;
-					var lIndex = trackStep.instrument;
+					if (row){
+						var trackStep = row[channel];
+						var uIndex = 0;
+						var lIndex = trackStep.instrument;
 
-					if (lIndex>15){
-						uIndex = 16; // TODO: Why is this 16 and not 1 ? Nobody wanted 255 instruments instead of 31 ?
-						lIndex = trackStep.instrument - 16;
+						if (lIndex>15){
+							uIndex = 16; // TODO: Why is this 16 and not 1 ? Nobody wanted 255 instruments instead of 31 ?
+							lIndex = trackStep.instrument - 16;
+						}
+
+						var v = (uIndex << 24) + (trackStep.period << 16) + (lIndex << 12) + (trackStep.effect << 8) + trackStep.param;
+						file.writeUint(v);
+					}else{
+						file.writeUint(0);
 					}
 
-					var v = (uIndex << 24) + (trackStep.period << 16) + (lIndex << 12) + (trackStep.effect << 8) + trackStep.param;
-					file.writeUint(v);
 				}
 			}
 		}
 
 		// sampleData;
-		instruments.forEach(function(instrument){
+		for (i = startI;i<=endI;i++){
+			var instrument = instruments[i];
 			if (instrument && instrument.sample.data && instrument.sample.length){
 				// should we put repeat info here?
-				file.clear(2);
+				//file.clear(2);
 				var d;
 				// instrument length is in word
-				for (i = 0; i < instrument.sample.length-2; i++){
-					d = instrument.sample.data[i] || 0;
+				for (var j = 0; j < instrument.sample.length; j++){
+					d = instrument.sample.data[j] || 0;
 					file.writeByte(Math.round(d*127));
 				}
 				console.log("write instrument with " + instrument.sample.length + " length");
 			}else{
 				// still write 4 bytes?
 			}
-		});
+		}
+
 
 		if (next) next(file);
 	};

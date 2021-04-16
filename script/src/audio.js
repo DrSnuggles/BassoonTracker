@@ -15,6 +15,7 @@ var Audio = (function(){
     var mediaRecorder;
     var recordingChunks = [];
     var offlineContext;
+    var onlineContext;
     var currentStereoSeparation = STEREOSEPARATION.BALANCED;
     var lastMasterVolume = 0;
     var usePanning;
@@ -36,11 +37,32 @@ var Audio = (function(){
 
     var isRendering = false;
 
-    function createAudioConnections(audioContext){
+    function createAudioConnections(audioContext,destination){
 
         cutOffVolume = audioContext.createGain();
         cutOffVolume.gain.setValueAtTime(1,0);
-        cutOffVolume.connect(audioContext.destination);
+
+        // Haas effect stereo expander
+        var useStereoExpander = false;
+        if (useStereoExpander){
+            var splitter = audioContext.createChannelSplitter(2);
+            var merger = audioContext.createChannelMerger(2);
+            var haasDelay = audioContext.createDelay(1);
+            cutOffVolume.connect(splitter);
+            splitter.connect(haasDelay, 0);
+            haasDelay.connect(merger, 0, 0);
+            splitter.connect(merger, 1, 1);
+            merger.connect(destination || audioContext.destination);
+            window.haasDelay = haasDelay;
+        }else{
+            cutOffVolume.connect(destination || audioContext.destination);
+        }
+
+
+
+
+
+
 
         masterVolume = audioContext.createGain();
         masterVolume.connect(cutOffVolume);
@@ -61,9 +83,11 @@ var Audio = (function(){
         context = new AudioContext();
     }
 
-    me.init = function(audioContext){
+    me.init = function(audioContext,destination){
 
         audioContext = audioContext || context;
+        context = audioContext;
+        me.context = context;
         if (!audioContext) return;
 
         usePanning = !!Audio.context.createStereoPanner;
@@ -72,7 +96,7 @@ var Audio = (function(){
         }
         hasUI = typeof Editor !== "undefined";
 
-        createAudioConnections(audioContext);
+        createAudioConnections(audioContext,destination);
 
         var numberOfTracks = Tracker.getTrackCount();
         filterChains = [];
@@ -289,7 +313,6 @@ var Audio = (function(){
             var playTime = time + sourceDelayTime;
 
             source.start(playTime,offset);
-
             var result = {
                 source: source,
                 volume: volumeGain,
@@ -326,7 +349,11 @@ var Audio = (function(){
         if (context){
             var source = context.createBufferSource();
             source.connect(masterVolume);
-            source.start();
+            try{
+            	source.start();
+			}catch (e){
+            	console.error(e);
+			}
         }
     };
 
@@ -392,6 +419,7 @@ var Audio = (function(){
 
         console.log("startRendering " + length);
         offlineContext = new OfflineAudioContext(2,44100*length,44100);
+        onlineContext = context;
         me.context = offlineContext;
         me.init(offlineContext);
     };
@@ -407,10 +435,11 @@ var Audio = (function(){
             // Note: The promise should reject when startRendering is called a second time on an OfflineAudioContext
         });
 
+
         // switch back to online Audio context;
-        me.context = context;
-        createAudioConnections(context);
-        me.init(context);
+        me.context = onlineContext;
+        createAudioConnections(onlineContext);
+        me.init(onlineContext);
     };
     //-->
 
@@ -446,7 +475,7 @@ var Audio = (function(){
 
         for (i = 0; i<numberOfTracks;i++){
             var filter = filterChains[i];
-            if (filter) filter.panningValue(i%2==0 ? -panAmount : panAmount);
+            if (filter) filter.panningValue((i%4===0)||(i%4===3) ? -panAmount : panAmount);
         }
     };
 

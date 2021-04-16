@@ -49,8 +49,6 @@ UI.app_patternPanel = function(){
     });
     me.addChild(sampleView);
 
-
-
     me.onPanelResize = function(){
 
 		if (Layout.showSideBar){
@@ -137,7 +135,7 @@ UI.app_patternPanel = function(){
 
     };
     me.onPanelResize();
-
+    
 
     function setTrackControlsLayout(){
 

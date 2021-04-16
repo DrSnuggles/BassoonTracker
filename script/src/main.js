@@ -4,12 +4,17 @@ var Main = function(){
     var me = {};
 
     me.init = function(){
+        console.log("initialising");
         Host.init();
         Tracker.init();
         Audio.init();
+        
+        UI.startMeasure();
         UI.init(function(){
-                window.focus();
-            if (!Audio.context){
+            window.focus();
+            me.isBrowserSupported = Audio.context && window.requestAnimationFrame;
+            if (!me.isBrowserSupported){
+                console.error("Browser not supported");
                 var dialog = UI.modalDialog();
                 dialog.setProperties({
                     width: UI.mainPanel.width,
@@ -23,10 +28,12 @@ var Main = function(){
     
                 UI.setModalElement(dialog);
             }else{
-    
                 Settings.readSettings();
+                if (debug) UI.measure("Read & Apply Settings");
                 App.init();
-    
+                Host.signalReady();
+                Editor.loadInitialFile();
+                if (debug) UI.endMeasure();
             }
         });
     };
@@ -34,4 +41,4 @@ var Main = function(){
     return me;
 }();
 
-document.addEventListener('DOMContentLoaded', Main.init);
+if (!Host.customConfig && document.addEventListener) document.addEventListener('DOMContentLoaded', Main.init);

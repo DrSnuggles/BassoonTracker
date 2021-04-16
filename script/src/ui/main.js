@@ -4,6 +4,10 @@ var ctx;
 var UI = (function(){
 
 	var me={};
+	
+	var screenWidth;
+	var screenHeight;
+	var useDevicePixelRatio = false;
 
 	var children = [];
 	var fontSmall;
@@ -14,7 +18,8 @@ var UI = (function(){
 	var fontDark;
 
 	var maxWidth = 1200;
-	var minHeight = 800;
+	var maxHeight = 2000;
+	var minHeight = 200;
 	var modalElement;
 	var needsRendering =  true;
 	var skipRenderSteps = 0;
@@ -22,6 +27,9 @@ var UI = (function(){
 	var beginTime = 0;
 	var beginRenderTime = 0;
 	var lastRenderTime = 0;
+	var beginMeasure = 0;
+	var currentMeasure = 0;
+	var endMeasure = 0;
 	var frames = 0;
 	var fps;
 	var minFps = 100;
@@ -39,42 +47,65 @@ var UI = (function(){
 	if (tracks == 8) maxWidth = 1200;
 	if (tracks == 16) maxWidth = 1600;
 	if (tracks >= 32) maxWidth = 3200;
+	
+	
+	// some light polyfills - mainly to ensure the App can still show the "browser not supported" message
+	var nowFunction;
+	if (window.performance && performance.now){
+		nowFunction = function(){ return performance.now()};
+	}else{
+		nowFunction = Date.now;
+	}
+
+	if (!window.requestAnimationFrame){
+		var lastTime = 0;
+		window.requestAnimationFrame = function(callback, element) {
+			var currTime = new Date().getTime();
+			var timeToCall = Math.max(0, 16 - (currTime - lastTime));
+			var id = window.setTimeout(function() { callback(currTime + timeToCall); },
+				timeToCall);
+			lastTime = currTime + timeToCall;
+			return id;
+		};
+	}
+	
 
 	me.init = function(next){
 		canvas = document.getElementById("canvas");
 		ctx = canvas.getContext("2d");
-
+		ctx.imageSmoothingEnabled=false;
+		
 		var w = window.innerWidth;
+		var h = window.innerHeight;
+
 		if (w>maxWidth) w=maxWidth;
-		canvas.width = w;
-		canvas.height = window.innerHeight;
+		if (h>maxHeight) h=maxHeight;
+
+		screenWidth = w;
+		screenHeight = h;
+		canvas.width =screenWidth;
+		canvas.height=screenHeight;
 
 		ctx.fillStyle = "black";
 		ctx.fillRect(0,0,canvas.width,canvas.height);
+		
+		ctx.fillStyle = "#78828F"
+		ctx.font = "20px sans-serif";
+		ctx.textAlign = "center";
+		ctx.fillText("Loading ...", canvas.width/2, canvas.height/2);
 
+		if (debug) UI.measure("Create Main Canvas");
+		
+		
 		UI.Assets.preLoad(function(){
 
+			if (debug) UI.measure("UI sprites");
 			console.log("UI assets loaded");
 			initAssets();
-
+			Input.init();
+			if (debug) UI.measure("Input Init");
 			render();
-
-			// load demo mod at startup
-			//Tracker.load('demomods/spacedeb.mod');
-
-			var initialFile = getUrlParameter("file");
-			if (initialFile){
-				initialFile = decodeURIComponent(initialFile);
-				
-				if (initialFile.substr(0,7).toLowerCase() === "http://" && document.location.protocol === "https:"){
-					// proxy plain HTTP reuests as this won't work over HTTPS
-					initialFile = BassoonProvider.proxyUrl(initialFile);
-				}
-			}else{
-				initialFile = Host.getBaseUrl() + 'demomods/Tinytune.mod';
-			}
-			Tracker.load(initialFile,true);
-
+			if (debug) UI.measure("First render");
 
 			// check version
 			if (typeof versionNumber !== "undefined"){
@@ -109,14 +140,17 @@ var UI = (function(){
 	};
 
 	me.initPlugin = function(config){
+		console.log("init plugin");
 		if (config.canvas){
 			canvas = config.canvas;
 		}else{
 			canvas = document.getElementById("canvas");
 			var w = window.innerWidth;
+
 			if (w>maxWidth) w=maxWidth;
+			if (w>maxHeight) w=maxHeight;
 			canvas.width = w;
-			canvas.height = window.innerHeight;
+			//canvas.height = window.innerHeight;
 		}
 
 		ctx = canvas.getContext("2d");
@@ -144,12 +178,15 @@ var UI = (function(){
 
 	me.setSize = function(newWidth,newHeight){
 		if (newWidth>maxWidth) newWidth = maxWidth;
-		//if (newHeight<minHeight) newHeight = minHeight;
+		if (newHeight>maxHeight) newHeight = maxHeight;
+		if (newHeight<minHeight) newHeight = minHeight;
 
-		if ((newWidth != canvas.width) || (newHeight != canvas.height)){
+		if ((newWidth !== canvas.width) || (newHeight !== canvas.height)){
 			ctx.clearRect(0,0,canvas.width,canvas.height);
-			canvas.width = newWidth;
-			canvas.height = newHeight;
+			screenWidth = newWidth;
+			screenHeight = newHeight;
+
+			me.scaleToDevicePixelRatio(useDevicePixelRatio);
             me.mainPanel.setSize(newWidth,newHeight);
 			//me.mainPanel.setLayout(0,0,newWidth,newHeight);
 
@@ -159,6 +196,25 @@ var UI = (function(){
 			needsRendering = true;
 		}
 	};
+	
+	me.scaleToDevicePixelRatio = function(active){
+		useDevicePixelRatio = !!active;
+		if (active && devicePixelRatio>1){
+			canvas.width = screenWidth * devicePixelRatio;
+			canvas.height = screenHeight * devicePixelRatio;
+
+			ctx.scale(devicePixelRatio, devicePixelRatio);
+			ctx.imageSmoothingEnabled = false;
+		}else{
+			canvas.width = screenWidth;
+			canvas.height = screenHeight;
+		}
+		canvas.style.width = screenWidth + 'px';
+		canvas.style.height = screenHeight + 'px';
+
+		UI.mainPanel.refresh();
+		
+	}
 
 	var initAssets = function(){
 		var fontImage =  Y.getImage("font");
@@ -206,6 +262,8 @@ var UI = (function(){
 			spaceWidth: 11,
 			margin: 1,
 			charsPerLine:20,
+			lineSpacing: 3,
+			chars: "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.,-_",
 			onlyUpperCase:true
 		});
 		window.fontBig = fontBig;
@@ -223,7 +281,7 @@ var UI = (function(){
 			chars: 	   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890#©_-&\"'()!.,?+=*$/\\;:[]{}",
 			charWidth: "888888883888998888888899987777757735739777757578987777777777778868864553348767888435555",
 			onlyUpperCase:false,
-			debug: true
+			debug: false
 		});
 		window.fontFT = fontFT;
 
@@ -306,12 +364,12 @@ var UI = (function(){
 		});
 		window.fontDark = fontDark;
 
-
+		if (debug) UI.measure("Generate font");
+		
 		UI.Assets.init();
 		UI.mainPanel = UI.MainPanel();
 		children.push(UI.mainPanel);
-
-		Input.init();
+		if (debug) UI.measure("Generate Main Panel");
 	};
 
 	var render = function(time){
@@ -321,17 +379,16 @@ var UI = (function(){
 		if (Tracker.isPlaying()){
 			var state = Tracker.getStateAtTime(Audio.context.currentTime+0.01);
 			if (state){
-				if (state.patternPos != UICache.patternPos){
+				if (state.patternPos !== UICache.patternPos){
 					Tracker.setCurrentPatternPos(state.patternPos);
 					UICache.patternPos = state.patternPos;
 				}
-				if (state.songPos != UICache.songPos){
+				if (state.songPos !== UICache.songPos){
 					Tracker.setCurrentSongPosition(state.songPos);
 					UICache.songPos = state.songPos;
 				}
 			}
 		}
-
 		if (skipRenderSteps){
 			renderStep++;
 			doRender = (renderStep>skipRenderSteps);
@@ -340,7 +397,7 @@ var UI = (function(){
         var startRenderTime = Audio.context ? Audio.context.currentTime : 0;
 		
 		if (doRender){
-			beginRenderTime = (performance || Date).now();
+			beginRenderTime = nowFunction();
 			var renderFps = 1000/(beginRenderTime-lastRenderTime);
 			renderfpsList.push(renderFps);
 			if (renderfpsList.length>20) renderfpsList.shift();
@@ -353,6 +410,12 @@ var UI = (function(){
 			renderStep = 0;
 			lastRenderTime = beginRenderTime;
 			EventBus.trigger(EVENT.screenRefresh);
+
+			if (modalElement && modalElement.needsRendering){
+				UI.mainPanel.refresh();
+				needsRendering = true;
+			}
+			
 			if (needsRendering){
 				children.forEach(function(element){
 					if (element.needsRendering) {
@@ -383,7 +446,7 @@ var UI = (function(){
                 if (fpsList.length>20) fpsList.shift();
                 
                 if (!fpsCalculated && fpsList.length>5){
-					Logger.info("fps");
+					Logger.info("init " + Math.round(endMeasure));
 					fpsCalculated = true;
 				}
                 
@@ -392,15 +455,13 @@ var UI = (function(){
 
 
         }
-
-
-
-
+        
 		window.requestAnimationFrame(render);
 	};
-
+	
 	me.setModalElement = function(elm){
 		modalElement = elm;
+		Input.setFocusElement(elm);
 	};
 
 	me.getModalElement = function(){
@@ -409,16 +470,15 @@ var UI = (function(){
 
 	me.removeModalElement = function(){
 		if (modalElement){
-
+			Input.clearFocusElement();
 		}
 		modalElement = undefined;
 		UI.mainPanel.refresh();
 		needsRendering = true;
-		window.requestAnimationFrame(render);
 	};
 
+
 	me.setSelection = function(_selection){
-		console.log("setting selection");
 		selection = _selection;
 		prevSelection = selection;
 	};
@@ -451,6 +511,13 @@ var UI = (function(){
 		selection = undefined;
 	};
 
+	me.deleteSelection = function(){
+		if (selection){
+			selection(SELECTION.DELETE);
+		}
+		selection = undefined;
+	};
+
 	me.pasteSelection = function(andClear){
 		if (!selection && prevSelection){
 			selection = prevSelection;
@@ -470,6 +537,61 @@ var UI = (function(){
 	me.hideContextMenu = function(){
 		EventBus.trigger(EVENT.hideContextMenu);
 	};
+
+	me.showDialog = function(text,onOk,onCancel,useInput){
+		var dialog = UI.modalDialog();
+		dialog.setProperties({
+			width: UI.mainPanel.width,
+			height: UI.mainPanel.height,
+			top: 0,
+			left: 0,
+			ok: !!onOk,
+			cancel: !!onCancel,
+			input: !!useInput
+		});
+
+		dialog.onClick = function(touchData){
+			if (useInput){
+				var elm = dialog.getElementAtPoint(touchData.x,touchData.y);
+				if (elm.name === "dialoginput"){
+					elm.activate();
+					return;
+				}
+			}
+			if (onCancel){
+				var elm = dialog.getElementAtPoint(touchData.x,touchData.y);
+				if (elm && elm.name){
+					if (elm.name === "okbutton"){
+						if (typeof onOk === "function") onOk(dialog.inputValue);
+					}else{
+						if (typeof onCancel === "function") onCancel();
+					}
+					dialog.close();
+				}
+			}else{
+				dialog.close();
+				if (onOk) onOk(dialog.inputValue);
+			}
+		};
+
+		dialog.onKeyDown = function(keyCode){
+			switch (keyCode){
+				case 13:
+					var value = dialog.inputValue;
+					dialog.close();
+					if (onOk) onOk(value);
+					return true;
+				case 27:
+					dialog.close();
+					if (onCancel) onCancel();
+					return true;
+			}
+		}
+
+		dialog.setText(text);
+		UI.setModalElement(dialog);
+	}
+
 
 	me.getChildren = function(){
 		return children;
@@ -514,6 +636,8 @@ var UI = (function(){
 		EventBus.trigger(EVENT.statusChange,{info:info,source: source, url:url});
 	};
 
+
+
 	me.stats = function(){
 		return {
 			fps : fps,
@@ -524,6 +648,26 @@ var UI = (function(){
 			skipRenderSteps: skipRenderSteps
 		}
 	};
+	
+	me.startMeasure = function(){
+		if (Audio.context){
+			beginMeasure = Audio.context.currentTime;
+			currentMeasure = beginMeasure;
+		}
+	}
+	me.measure = function(message){
+		if (Audio.context){
+			var time = (Audio.context.currentTime - currentMeasure) * 1000;
+			currentMeasure = Audio.context.currentTime;
+			console.warn(message + ": " + time);
+		}
+	}
+	me.endMeasure = function(){
+		if (Audio.context){
+			endMeasure = (Audio.context.currentTime - beginMeasure) * 1000;
+			if (debug) console.warn( "Total time: " + endMeasure);
+		}
+	}
 
 	me.children = children;
 
@@ -548,7 +692,7 @@ var UI = (function(){
 	};
 
 	EventBus.on(EVENT.clockEventExpired,function(){
-		var now = new Date().getTime();
+		var now = nowFunction();
 		if (now-prevEventExpired>2000){
 			Logger.warn("throttling back");
 			if (skipRenderSteps<4){

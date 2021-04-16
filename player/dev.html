@@ -33,7 +33,6 @@
     <script src="../script/src/models/sample.js"></script>
     <script src="../script/src/models/note.js"></script>
 
-    <script src="../script/src/lib/UZIP.depacker_pack_20200308.js"></script>
 
     <script>
 
@@ -42,7 +41,7 @@
             if (!Audio.context){
                 alert("Sorry\nYour browser does not support WebAudio\nSupported browsers are\nChrome, Firefox, Safari, and Edge");
             }else{
-                Tracker.load("../demomods/StardustMemories.zip",false,function(){
+                Tracker.load("../demomods/StardustMemories.mod",false,function(){
                     setTimeout(Tracker.playSong,100);
                 });
             }
@@ -55,3 +54,5 @@
 
 </body>
 </html>
+
+

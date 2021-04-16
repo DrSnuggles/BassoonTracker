@@ -12,17 +12,18 @@ var Host = function(){
 	var me = {};
 	var hostBridge;
 	
-	me.useUrlParams = true;
+	me.$f = true;
 	me.useDropbox = true;
 	me.showInternalMenu = true;
 	me.useWebWorkers = true;
+	me.useInitialLoad = true;
 	
 	me.init = function(){
 	    if (typeof HostBridge === "object"){
 			hostBridge = HostBridge;
 			hostBridge.init();
 
-			if (typeof hostBridge.useUrlParams === "boolean") me.useUrlParams = hostBridge.useUrlParams;
+			if (typeof hostBridge.$f === "boolean") me.$f = hostBridge.$f;
 			if (typeof hostBridge.useDropbox === "boolean") me.useDropbox = hostBridge.useDropboxs;
 			if (typeof hostBridge.showInternalMenu === "boolean") me.showInternalMenu = hostBridge.showInternalMenu;
 			if (typeof hostBridge.useWebWorkers === "boolean") me.useWebWorkers = hostBridge.useWebWorkers;
@@ -59,6 +60,10 @@ var Host = function(){
 		if (typeof buildNumber !== "undefined") return buildNumber;
 		if (hostBridge && hostBridge.getBuildNumber) return hostBridge.getBuildNumber();
 		return new Date().getTime();
+	};
+
+	me.signalReady = function(){
+		if (hostBridge && hostBridge.signalReady) hostBridge.signalReady();
 	};
 	
 	me.putFile = function(file_a,file){
@@ -134,7 +139,14 @@ var EVENT = {
 	commandUndo: 50,
 	commandRedo: 51,
 	commandSelectAll: 52,
-	songEnd: 53
+	songEnd: 53,
+	patternEnd: 54,
+	songSpeedChangeIgnored:55,
+	songBPMChangeIgnored:56,
+	commandProcessSample: 57,
+	pluginRenderHook: 58,
+	menuLayoutChanged: 59,
+	midiIn: 60
 };
 
 var COMMAND = {
@@ -144,7 +156,7 @@ var COMMAND = {
 	clearTrack : 4,
 	clearPattern : 5,
 	clearSong : 6,
-	clearInstruments : 7,
+	$a : 7,
 	showMain : 8,
 	showOptions : 9,
 	showFileOperations : 10,
@@ -162,7 +174,10 @@ var COMMAND = {
 	copy: 22,
 	paste: 23,
 	pattern2Sample: 24,
-	toggleAppSideBar: 25
+	toggleAppSideBar: 25,
+	undo: 26,
+	redo: 27,
+	nibbles: 28
 };
 
 var PLAYTYPE = {
@@ -214,14 +229,20 @@ var SELECTION = {
 	CUT: 3,
 	COPY : 4,
 	PASTE : 5,
-	POSITION: 6
+	POSITION: 6,
+	DELETE: 7,
+	REPLACE: 8
 
 };
 
 var EDITACTION = {
 	PATTERN: 1,
 	TRACK: 2,
-	NOTE: 3
+	NOTE: 3,
+	RANGE: 4,
+	VALUE: 5,
+	DATA: 6,
+	SAMPLE: 7
 };
 
 
@@ -649,7 +670,8 @@ var SETTINGS = {
 	keyboardTable: "qwerty",
 	vubars: true,
 	stereoSeparation: STEREOSEPARATION.BALANCED,
-	_ac: true
+	_B: true,
+	loadInitialFile:true
 };;
 var EventBus = (function() {
 
@@ -657,21 +679,27 @@ var EventBus = (function() {
 
     var me = {};
 
-    me.on = function (event, listener) {
+    me.on = function(event, listener) {
         var eventHandlers = allEventHandlers[event];
         if (!eventHandlers) {
             eventHandlers = [];
             allEventHandlers[event] = eventHandlers;
         }
         eventHandlers.push(listener);
+        return eventHandlers.length;
     };
+    
+    me.off = function(event,index){
+        var eventHandlers = allEventHandlers[event];
+        if (eventHandlers) eventHandlers[index-1]=undefined;
+    }
 
     me._o = function(event, context) {
         var eventHandlers = allEventHandlers[event];
         if (eventHandlers) {
             var i, len = eventHandlers.length;
             for (i = 0; i < len; i++) {
-                eventHandlers[i](context,event);
+                if (eventHandlers[i]) eventHandlers[i](context,event);
             }
         }
     };
@@ -705,7 +733,7 @@ function saveFile(b,file_a){
 function BinaryStream(arrayBuffer, bigEndian){
 	var obj = {
 		index: 0,
-		_am : !bigEndian
+		_N : !bigEndian
 	};
 
 	obj.goto = function(value){
@@ -744,14 +772,14 @@ function BinaryStream(arrayBuffer, bigEndian){
 
 	obj.readUint = function(position){
 		setIndex(position);
-		var i = this.dataView.getUint32(this.index,this._am);
+		var i = this.dataView.getUint32(this.index,this._N);
 		this.index+=4;
 		return i;
 	};
 
 	obj.writeUint = function(value,position){
 		setIndex(position);
-		this.dataView.setUint32(this.index,value,this._am);
+		this.dataView.setUint32(this.index,value,this._N);
 		this.index+=4;
 	};
 
@@ -795,7 +823,7 @@ function BinaryStream(arrayBuffer, bigEndian){
 		this.index += len;
 	};
 
-	obj._ah = function(value,max,paddValue,position){
+	obj._I = function(value,max,paddValue,position){
 		setIndex(position);
 		max = max || 1;
 		value = value || "";
@@ -809,23 +837,23 @@ function BinaryStream(arrayBuffer, bigEndian){
 	// same as readUshort
 	obj._g = function(position){
 		setIndex(position);
-		var w = this.dataView.getUint16(this.index, this._am);
+		var w = this.dataView.getUint16(this.index, this._N);
 		this.index += 2;
 		return w;
 	};
 
 	obj._h = function(value,position){
 		setIndex(position);
-		this.dataView.setUint16(this.index,value,this._am);
+		this.dataView.setUint16(this.index,value,this._N);
 		this.index += 2;
 	};
 
-	obj.readLong = obj.readDWord = obj.readUint;
+	obj.readLong = obj.$c = obj.readUint;
 	obj.writeLong = obj.writeDWord = obj.writeUint;
 
 	obj.readShort = function(value,position){
 		setIndex(position);
-		var w = this.dataView.getInt16(this.index, this._am);
+		var w = this.dataView.getInt16(this.index, this._N);
 		this.index += 2;
 		return w;
 	};
@@ -881,6 +909,7 @@ var Audio = (function(){
     var mediaRecorder;
     var recordingChunks = [];
     var offlineContext;
+    var onlineContext;
     var currentStereoSeparation = STEREOSEPARATION.BALANCED;
     var lastMasterVolume = 0;
     var usePanning;
@@ -902,11 +931,32 @@ var Audio = (function(){
 
     var isRendering = false;
 
-    function createAudioConnections(audioContext){
+    function createAudioConnections(audioContext,destination){
 
         cutOffVolume = audioContext.createGain();
         cutOffVolume.gain.setValueAtTime(1,0);
-        cutOffVolume.connect(audioContext.destination);
+
+        // Haas effect stereo expander
+        var useStereoExpander = false;
+        if (useStereoExpander){
+            var splitter = audioContext.createChannelSplitter(2);
+            var merger = audioContext.createChannelMerger(2);
+            var haasDelay = audioContext.createDelay(1);
+            cutOffVolume.connect(splitter);
+            splitter.connect(haasDelay, 0);
+            haasDelay.connect(merger, 0, 0);
+            splitter.connect(merger, 1, 1);
+            merger.connect(destination || audioContext.destination);
+            window.haasDelay = haasDelay;
+        }else{
+            cutOffVolume.connect(destination || audioContext.destination);
+        }
+
+
+
+
+
+
 
         masterVolume = audioContext.createGain();
         masterVolume.connect(cutOffVolume);
@@ -927,9 +977,11 @@ var Audio = (function(){
         context = new AudioContext();
     }
 
-    me.init = function(audioContext){
+    me.init = function(audioContext,destination){
 
         audioContext = audioContext || context;
+        context = audioContext;
+        me.context = context;
         if (!audioContext) return;
 
         usePanning = !!Audio.context.createStereoPanner;
@@ -938,9 +990,9 @@ var Audio = (function(){
         }
         hasUI = typeof Editor !== "undefined";
 
-        createAudioConnections(audioContext);
+        createAudioConnections(audioContext,destination);
 
-        var numberOfTracks = Tracker.getTrackCount();
+        var numberOfTracks = Tracker.$b();
         filterChains = [];
 
         function addFilterChain(){
@@ -1025,7 +1077,7 @@ var Audio = (function(){
             volume = 0; // note off
         }
 
-        var _u = Tracker._t(index);
+        var _u = Tracker.getInstrument(index);
         var basePeriod = _b;
 		var _c;
 		var _d;
@@ -1046,20 +1098,20 @@ var Audio = (function(){
 			// apply finetune
 			if (Tracker._j()){
                 if (Tracker._s){
-					_b -= _u._af()/2;
+					_b -= _u._G()/2;
 				}else{
-					if (_u._af()){
-						_b = me._ap(noteIndex,_u._af());
+					if (_u._G()){
+						_b = me._E(noteIndex,_u._G());
 					}
                 }
             }else{
                 // protracker frequency
-				if (_u._af()){
-					_b = me._aq(_b,_u._af());
+				if (_u._G()){
+					_b = me._F(_b,_u._G());
 				}
             }
 
-            sampleRate = me._ao(_b);
+            sampleRate = me._P(_b);
             var initialPlaybackRate = 1;
 
             if (_u.sample.data.length) {
@@ -1126,15 +1178,15 @@ var Audio = (function(){
                 source.connect(volumeGain);
             }
 
-			var volumeFadeOut = Audio.context.createGain();
-			volumeFadeOut.gain.setValueAtTime(0,time);
-			volumeFadeOut.gain.linearRampToValueAtTime(1,time + 0.01);
-			volumeGain.connect(volumeFadeOut);
+			var _X = Audio.context.createGain();
+			_X.gain.setValueAtTime(0,time);
+			_X.gain.linearRampToValueAtTime(1,time + 0.01);
+			volumeGain.connect(_X);
 
 			if (usePanning){
 				var panning = Audio.context.createStereoPanner();
 				panning.pan.setValueAtTime(pan,time);
-				volumeFadeOut.connect(panning);
+				_X.connect(panning);
 				panning.connect(filterChains[track].input());
             }else{
 
@@ -1146,7 +1198,7 @@ var Audio = (function(){
 				panning.setPosition(pan, 0, 1 - Math.abs(pan));
 				*/
 				
-				volumeFadeOut.connect(filterChains[track].input());
+				_X.connect(filterChains[track].input());
             }
 
 
@@ -1155,17 +1207,16 @@ var Audio = (function(){
             var playTime = time + sourceDelayTime;
 
             source.start(playTime,offset);
-
             var result = {
                 source: source,
                 volume: volumeGain,
                 panning: panning,
 				_c: _c,
 				_d: _d,
-				volumeFadeOut: volumeFadeOut,
-                startVolume: volume,
-                currentVolume: volume,
-                startPeriod: _b,
+				_X: _X,
+                _Y: volume,
+                _V: volume,
+                _U: _b,
                 basePeriod: basePeriod,
                 noteIndex: noteIndex,
                 startPlaybackRate: initialPlaybackRate,
@@ -1192,7 +1243,11 @@ var Audio = (function(){
         if (context){
             var source = context.createBufferSource();
             source.connect(masterVolume);
-            source.start();
+            try{
+            	source.start();
+			}catch (e){
+            	console.error(e);
+			}
         }
     };
 
@@ -1216,7 +1271,7 @@ var Audio = (function(){
     me.setStereoSeparation = function(value){
 
 		var panAmount;
-		var numberOfTracks = Tracker.getTrackCount();
+		var numberOfTracks = Tracker.$b();
 
     	if (Tracker._j()){
     		panAmount = 0;
@@ -1245,7 +1300,7 @@ var Audio = (function(){
 
         for (i = 0; i<numberOfTracks;i++){
             var filter = filterChains[i];
-            if (filter) filter.panningValue(i%2==0 ? -panAmount : panAmount);
+            if (filter) filter.panningValue((i%4===0)||(i%4===3) ? -panAmount : panAmount);
         }
     };
 
@@ -1337,7 +1392,7 @@ var Audio = (function(){
     me.getSemiToneFrom = function(_b,semitones,finetune){
         var result = _b;
         if (finetune) {
-            _b = me._afBasePeriod(_b,finetune);
+            _b = me._GBasePeriod(_b,finetune);
             if (!_b){
                 _b = result;
                 console.error("ERROR: base _b for finetuned " + finetune + " _b " + _b + " not found");
@@ -1353,7 +1408,7 @@ var Audio = (function(){
                     var targetNote = _aNoteTable[targetName];
                     if (targetNote){
                         result = targetNote._b;
-                        if (finetune) {result = me._aq(result,finetune)}
+                        if (finetune) {result = me._F(result,finetune)}
                     }
                 }
             }else{
@@ -1368,7 +1423,7 @@ var Audio = (function(){
     me.getNearestSemiTone = function(_b,_q){
         var tuning = 8;
         if (_q){
-            var _u = Tracker._t(_q);
+            var _u = Tracker.getInstrument(_q);
             if (_u && _u.sample.finetune) tuning = tuning + _u.sample.finetune;
         }
 
@@ -1389,7 +1444,7 @@ var Audio = (function(){
     };
 
     // gives the finetuned _b for a base _b - protracker mode
-    me._aq = function(_b,finetune){
+    me._F = function(_b,finetune){
         var result = _b;
         var note = _bNoteTable[_b];
         if (note && note.tune){
@@ -1402,7 +1457,7 @@ var Audio = (function(){
     };
 
     // gives the finetuned _b for a base note (Fast Tracker Mode)
-    me._ap = function(note,finetune){
+    me._E = function(note,finetune){
         if (note === NOTEOFF) return 1;
 
         var ftNote1 = FTNotes[note];
@@ -1419,7 +1474,7 @@ var Audio = (function(){
     };
 
     // gives the non-finetuned base_b for a finetuned _b
-    me._afBasePeriod = function(_b,finetune){
+    me._GBasePeriod = function(_b,finetune){
         var result = _b;
         var table = _bFinetuneTable[finetune];
         if (table){
@@ -1428,7 +1483,7 @@ var Audio = (function(){
         return result;
     };
 
-	me._ao = function(_b){
+	me._P = function(_b){
 		if (Tracker._j()){
 			if (Tracker._s) return (8363 * Math.pow(2,((4608 - _b) / 768)));
 			return PC_FREQUENCY_HALF / _b;
@@ -2088,8 +2143,6 @@ FilterChain = (function(filters) {
 	};
 
 	me.setState = function(_a,value){
-		console.error(_a,value);
-
 		disConnectFilter();
 
         if (_a==="high") useHigh=!!value;
@@ -2133,6 +2186,7 @@ var Tracker = (function(){
 
 	// TODO: strip UI stuff
 	var me = {};
+	me.isMaster = true;
 
 	var clock;
 
@@ -2142,7 +2196,7 @@ var Tracker = (function(){
 	var song;
 	var _us = [];
 
-	var currentInstrumentIndex = 1;
+	var _ZIndex = 1;
 	var prevInstrumentIndex;
 	var currentPattern = 0;
 	var prevPattern;
@@ -2174,15 +2228,16 @@ var Tracker = (function(){
 	var trackerStates = [];
 	var patternLoopStart = [];
 	var patternLoopCount = [];
-
-	for (var i=0;i<trackCount;i++){
-		trackNotes.push({});
-		trackEffectCache.push({});
-	}
-
-	console.log("ticktime: " + tickTime);
+	
+	//console.log("ticktime: " + tickTime);
 
 	me.init = function(config){
+
+		for (var i=0;i<trackCount;i++){
+			trackNotes.push({});
+			trackEffectCache.push({});
+		}
+		
 		for (var i = -8; i<8;i++){
 			_bFinetuneTable[i] = {};
 		}
@@ -2218,17 +2273,52 @@ var Tracker = (function(){
 		}
 
 		if (config) {
-			Audio.init();
-			if (config.plugin) UI.initPlugin(config);
+			Host.init();
+			Audio.init(config.audioContext,config.audioDestination);
+			if (config.plugin){
+				me.isPlugin = true;
+				UI.initPlugin(config);
+				if (typeof config.isMaster === "boolean") me.isMaster = config.isMaster;
+				if (config.handler){
+					EventBus.on(EVENT.songBPMChange,function(bpm){
+						config.handler(EVENT.songBPMChange,bpm);
+					});
+					EventBus.on(EVENT.songBPMChangeIgnored,function(bpm){
+						config.handler(EVENT.songBPMChangeIgnored,bpm);
+					});
+
+
+
+					EventBus.on(EVENT.songSpeedChange,function(speed){
+						config.handler(EVENT.songSpeedChange,speed);
+					});
+					EventBus.on(EVENT.songSpeedChangeIgnored,function(speed){
+						config.handler(EVENT.songSpeedChangeIgnored,speed);
+					});
+
+
+					EventBus.on(EVENT.patternEnd,function(time){
+						config.handler(EVENT.patternEnd,time);
+					});
+				}
+			}
 		}
 
 	};
+	
+	me.setMaster = function(value){
+		me.isMaster = value;
+	}
 
-	me.setCurrentInstrumentIndex = function(index){
+	me.isMaster = function(){
+		return !!me.isMaster;
+	}
+
+	me._S = function(index){
 		if (song._us[index]){
-			currentInstrumentIndex = index;
-			if (prevInstrumentIndex!=currentInstrumentIndex) EventBus._o(EVENT._uChange,currentInstrumentIndex);
-			prevInstrumentIndex = currentInstrumentIndex;
+			_ZIndex = index;
+			if (prevInstrumentIndex!=_ZIndex) EventBus._o(EVENT._uChange,_ZIndex);
+			prevInstrumentIndex = _ZIndex;
 		}else{
 			if (index<=me.getMaxInstruments()){
 				for (var i = song._us.length, max = index;i<=max;i++){
@@ -2242,19 +2332,19 @@ var Tracker = (function(){
 					EventBus._o(EVENT._uListChange,_uContainer);
 				}
 
-				currentInstrumentIndex = index;
-				if (prevInstrumentIndex!=currentInstrumentIndex) EventBus._o(EVENT._uChange,currentInstrumentIndex);
-				prevInstrumentIndex = currentInstrumentIndex;
+				_ZIndex = index;
+				if (prevInstrumentIndex!=_ZIndex) EventBus._o(EVENT._uChange,_ZIndex);
+				prevInstrumentIndex = _ZIndex;
 			}
 		}
 	};
 
 	me.getCurrentInstrumentIndex = function(){
-		return currentInstrumentIndex;
+		return _ZIndex;
 	};
 
 	me.getCurrentInstrument = function(){
-		return _us[currentInstrumentIndex];
+		return _us[_ZIndex];
 	};
 
 	me.getMaxInstruments = function(){
@@ -2289,7 +2379,7 @@ var Tracker = (function(){
 		}
 	};
 
-	me._ad = function(index){
+	me._C = function(index){
 		currentPatternPos = index;
 		if (prevPatternPos!=currentPatternPos) EventBus._o(EVENT.patternPosChange,{current: currentPatternPos, prev: prevPatternPos});
 		prevPatternPos = currentPatternPos;
@@ -2302,7 +2392,7 @@ var Tracker = (function(){
 		var max = patternLength-1;
 		if (newPos<0) newPos = max;
 		if (newPos>max) newPos = 0;
-		me._ad(newPos);
+		me._C(newPos);
 	};
 
 
@@ -2321,43 +2411,6 @@ var Tracker = (function(){
 				me.togglePlay();
 			}
 		}
-	};
-
-	me.addToPatternTable = function(index,patternIndex){
-		if (typeof index == "undefined") index = song.length;
-		patternIndex = patternIndex||0;
-
-		if (index == song.length){
-			song.patternTable[index] = patternIndex;
-			song.length++;
-		}else{
-			// TODO: insert pattern;
-		}
-
-		EventBus._o(EVENT.songPropertyChange,song);
-		EventBus._o(EVENT.patternTableChange);
-
-
-	};
-
-	me.removeFromPatternTable = function(index){
-		if (song.length<2) return;
-		if (typeof index == "undefined") index = song.length-1;
-
-		if (index == song.length-1){
-			song.patternTable[index] = 0;
-			song.length--;
-		}else{
-			// TODO: remove pattern and shift other patterns up;
-		}
-
-		if (currentSongPosition == song.length){
-			me.setCurrentSongPosition(currentSongPosition-1);
-		}
-
-		EventBus._o(EVENT.songPropertyChange,song);
-		EventBus._o(EVENT.patternTableChange);
-
 	};
 
 	me.setPlayType = function(playType){
@@ -2393,7 +2446,7 @@ var Tracker = (function(){
 	me.stop = function(){
 		if (clock) clock.stop();
 		Audio.disable();
-		Audio.setMasterVolume(1);
+		if (!me.isPlugin) Audio.setMasterVolume(1);
 		if (UI) {
 			UI.setStatus("Ready");
 			Input.clearInputNotes();
@@ -2483,7 +2536,7 @@ var Tracker = (function(){
 
 			while (time<maxTime){
 
-				// ignore spped==0 when autoplay is active (Playlists)
+				// ignore speed==0 when autoplay is active (Playlists)
                 if(stepResult.pause && !Tracker.autoPlay){
                     // speed is set to 0
 					if (!stepResult.pasuseHandled){
@@ -2500,15 +2553,16 @@ var Tracker = (function(){
 					}
 					return;
                 }
-
+                
                 me.setStateAtTime(time,{patternPos: p, songPos: playSongPosition});
+                if (!UI) me.setCurrentSongPosition(playSongPosition);
 
 				if (stepResult.patternDelay){
 					// the E14 effect is used: delay Pattern but keep processing effects
 					stepResult.patternDelay--;
 
 					for (i = 0; i<trackCount; i++){
-						applyEffects(i,time)
+						applyEffects(i,time);
 					}
 
 					time += ticksPerStep * tickTime;
@@ -2516,17 +2570,17 @@ var Tracker = (function(){
 					stepResult = playPatternStep(p,time,playPatternData,playSongPosition);
 					time += ticksPerStep * tickTime;
 					p++;
-					if (p>=thisPatternLength || stepResult.patternBreak){
-						if (!(stepResult.positionBreak && stepResult._ab == playSongPosition)){
+					if (p>=thisPatternLength || stepResult._W){
+						if (!(stepResult.positionBreak && stepResult._A == playSongPosition)){
 							//We're not in a pattern loop
 							patternLoopStart = [];
 							patternLoopCount = [];
 						}
 						p=0;
 						if (Tracker.getPlayType() == PLAYTYPE.song){
-							var nextPosition = stepResult.positionBreak ? stepResult._ab : ++playSongPosition;
+							var nextPosition = stepResult.positionBreak ? stepResult._A : ++playSongPosition;
 							if (nextPosition>=song.length) {
-								nextPosition = song._ak ? song._ak-1 : 0;
+								nextPosition = song._L ? song._L-1 : 0;
 								EventBus._o(EVENT.songEnd);
 							}
 							if (nextPosition>=song.length) nextPosition = 0;
@@ -2541,16 +2595,17 @@ var Tracker = (function(){
 							}
 
                             thisPatternLength = playPatternData.length;
-							if (stepResult.patternBreak){
+							if (stepResult._W){
 								p = stepResult._y || 0;
 								if (p>playPatternData.length) p=0; // occurs in the wild - example "Lake Of Sadness" - last pattern
                             }
 						}else{
-							if (stepResult.patternBreak) {
+							if (stepResult._W) {
 								p = stepResult._y || 0;
 								if (p>patternLength) p=0;
 							}
 						}
+						EventBus._o(EVENT.patternEnd,time - ticksPerStep * tickTime);
 					}
 				}
 
@@ -2562,7 +2617,7 @@ var Tracker = (function(){
                 var trackNote = trackNotes[i];
                 if (trackNote && trackNote.time && trackNote.scheduled){
 
-					var _u = me._t(trackNote._q);
+					var _u = me.getInstrument(trackNote._q);
 					if(_u){
 
 					}
@@ -2606,11 +2661,13 @@ var Tracker = (function(){
 		// example: see the ED2 command pattern 0, track 3, step 32 in AceMan - Dirty Tricks.mod
 		// not sure this is 100% correct, but in any case it's more correct then setting it at the track it self.
 		// Thinking ... ... yes ... should be fine as no speed related effects are processed on tick 0?
+		//
+		
 
 		for (var i = 0; i<tracks; i++){
 			note = patternStep[i];
 			if (note && note.effect && note.effect === 15){
-				if (note._i <= 32){
+				if (note._i < 32){
 					//if (note._i == 0) note._i = 1;
 					Tracker._x(note._i);
 					if (note._i === 0) result.pause = true;
@@ -2636,14 +2693,14 @@ var Tracker = (function(){
 
 
                 r = playNote(note,i,playtime,songPos);
-                if (r.patternBreak) {
-                    result.patternBreak = true;
+                if (r._W) {
+                    result._W = true;
                     result._y = r._y || 0;
                 }
                 if (r.positionBreak) {
                     result.positionBreak = true;
                     result._y = r._y || 0;
-                    result._ab = r._ab || 0;
+                    result._A = r._A || 0;
                 }
                 if (r.patternDelay) result.patternDelay = r.patternDelay;
 			}
@@ -2671,10 +2728,10 @@ var Tracker = (function(){
 
 		if (notePeriod && !_q){
 			// reuse previous _u
-			_q = trackNotes[track].currentInstrument;
-			defaultVolume = typeof trackNotes[track].currentVolume === "number" ? trackNotes[track].currentVolume : defaultVolume;
+			_q = trackNotes[track]._Z;
+			defaultVolume = typeof trackNotes[track]._V === "number" ? trackNotes[track]._V : defaultVolume;
 
-			if (SETTINGS._ac && _q && trackEffectCache[track].offset){
+			if (SETTINGS._B && _q && trackEffectCache[track].offset){
 				if (trackEffectCache[track].offset._u === _q){
 					console.log("applying _u offset cache to _u " + _q);
 					trackEffects.offset = trackEffectCache[track].offset;
@@ -2684,11 +2741,11 @@ var Tracker = (function(){
 
 
 		if (typeof note._u === "number"){
-			_u = me._t(note._u);
+			_u = me.getInstrument(note._u);
 			if (_u) {
 				defaultVolume = 100 * (_u.sample.volume/64);
 
-				if (SETTINGS._ac){
+				if (SETTINGS._B){
 					// reset _u offset when a _u number is present;
 					trackEffectCache[track].offset = trackEffectCache[track].offset || {};
 					trackEffectCache[track].offset.value = 0;
@@ -2704,7 +2761,7 @@ var Tracker = (function(){
 
 
 		if (typeof _q === "number"){
-			_u = me._t(_q);
+			_u = me.getInstrument(_q);
 		}
 
 
@@ -2715,7 +2772,7 @@ var Tracker = (function(){
 			}
 
 			if (noteIndex === NOTEOFF){
-				var offInstrument = _u || me._t(trackNotes[track].currentInstrument);
+				var offInstrument = _u || me.getInstrument(trackNotes[track]._Z);
 				if (offInstrument){
 					volume = offInstrument.noteOff(time,trackNotes[track]);
 				}else{
@@ -2750,8 +2807,8 @@ var Tracker = (function(){
 
 		var result = {};
 
-        if (note.volumeEffect && me._j()){
-        	var ve = note.volumeEffect;
+        if (note._T && me._j()){
+        	var ve = note._T;
             x = ve >> 4;
 			y = ve & 0x0f;
 
@@ -2843,19 +2900,19 @@ var Tracker = (function(){
 					// how does this work?
 					// see example just_about_seven.mod
 
-                    _u = _u || me._t(trackNotes[track].currentInstrument);
+                    _u = _u || me.getInstrument(trackNotes[track]._Z);
 
 					if (me._j()){
                         if (_u){
 							var _noteIndex = noteIndex || trackNotes[track].noteIndex;
-							var root = _u._an(_noteIndex,true);
+							var root = _u._O(_noteIndex,true);
                             if (noteIndex === NOTEOFF) {
                                 trackEffects.arpeggio = trackEffectCache[track].arpeggio;
                             }else{
                                 trackEffects.arpeggio = {
                                     root: root,
-                                    interval1: root - _u._an(_noteIndex+x,true),
-                                    interval2: root - _u._an(_noteIndex+y,true),
+                                    interval1: root - _u._O(_noteIndex+x,true),
+                                    interval2: root - _u._O(_noteIndex+y,true),
                                     step:1
                                 };
 
@@ -2863,11 +2920,11 @@ var Tracker = (function(){
 							}
                         }
 					}else{
-                        root = notePeriod || trackNotes[track].startPeriod;
+                        root = notePeriod || trackNotes[track]._U;
                         // check if the _u is finetuned
                         if (_u){
-                            finetune = _u._af();
-                            if (finetune) root = Audio._aq(root,finetune);
+                            finetune = _u._G();
+                            if (finetune) root = Audio._F(root,finetune);
                         }
 
                         trackEffects.arpeggio = {
@@ -2940,13 +2997,13 @@ var Tracker = (function(){
 				if (me._j() && noteIndex === NOTEOFF) target = 0;
 
 				// avoid using the fineTune of another _u if another _u index is present
-				if (trackNotes[track].currentInstrument) _q = trackNotes[track].currentInstrument;
+				if (trackNotes[track]._Z) _q = trackNotes[track]._Z;
 
 				if (target && _q){
 					// check if the _u is finetuned
-					var _u = me._t(_q);
-					if (_u && _u._af()){
-                        target = me._j() ?  _u._an(noteIndex,true) : Audio._aq(target,_u._af());
+					var _u = me.getInstrument(_q);
+					if (_u && _u._G()){
+                        target = me._j() ?  _u._O(noteIndex,true) : Audio._F(target,_u._G());
 					}
 				}
 
@@ -2956,7 +3013,7 @@ var Tracker = (function(){
 					if (!value) value = prevSlide.value;
 				}
 				if (!target) {
-					target = trackEffectCache[track].defaultSlideTarget;
+					target = trackEffectCache[track].$e;
 				}
 
 				trackEffects.slide = {
@@ -2979,7 +3036,7 @@ var Tracker = (function(){
 				// _p
 				// reset volume and _p timer if _u number is present
 				if (note._u) {
-					if (trackNotes[track].startVolume) {
+					if (trackNotes[track]._Y) {
 						trackEffects.volume = {
 							value: volume
 						};
@@ -3011,9 +3068,9 @@ var Tracker = (function(){
 
 				if (target && _q){
 					// check if the _u is finetuned
-					_u = me._t(_q);
-					if (_u && _u._af()){
-                        target = me._j() ?  Audio._ap(noteIndex,_u._af()) : Audio._aq(target,_u._af());
+					_u = me.getInstrument(_q);
+					if (_u && _u._G()){
+                        target = me._j() ?  Audio._E(noteIndex,_u._G()) : Audio._F(target,_u._G());
 					}
 				}
 
@@ -3069,7 +3126,7 @@ var Tracker = (function(){
 
 				// reset volume and _p timer if _u number is present
 				if (note._u) {
-					if (trackNotes[track].startVolume) {
+					if (trackNotes[track]._Y) {
 						trackEffects.volume = {
 							value: volume
 						};
@@ -3108,7 +3165,7 @@ var Tracker = (function(){
 				// when only a _b -> reset the wave form / timer
 
 				if (notePeriod && !note._u) {
-					if (trackNotes[track].startVolume) {
+					if (trackNotes[track]._Y) {
 						trackEffects.volume = {
 							value: volume
 						};
@@ -3167,7 +3224,7 @@ var Tracker = (function(){
 				}
 				var stepValue = value;
 
-				if (SETTINGS._ac && !note._u && trackEffectCache[track].offset){
+				if (SETTINGS._B && !note._u && trackEffectCache[track].offset){
 					// bug in PT1 and PT2: add to existing offset if no _u number is given
 					value += trackEffectCache[track].offset.value;
 				}
@@ -3183,7 +3240,7 @@ var Tracker = (function(){
 				trackEffectCache[track].offset.stepValue = trackEffects.offset.stepValue;
 
 
-				if (SETTINGS._ac){
+				if (SETTINGS._B){
 
 					// quirk in PT1 and PT2: remember _u offset for _u
 					if (note._u) {
@@ -3240,9 +3297,9 @@ var Tracker = (function(){
 
 				// quickfix for autoplay ...
 				if (!Tracker.autoPlay){
-					result.patternBreak = true;
+					result._W = true;
 					result.positionBreak = true;
-					result._ab = note._i;
+					result._A = note._i;
 					result._y = 0;
 				}
 				break;
@@ -3256,7 +3313,7 @@ var Tracker = (function(){
 				break;
 			case 13:
 				// Pattern Break
-				result.patternBreak = true;
+				result._W = true;
 				x = value >> 4;
 				y = value & 0x0f;
 				result._y = x*10 + y;
@@ -3303,9 +3360,9 @@ var Tracker = (function(){
 							break;
 						case 5: // Set Fine Tune
 							if (_q){
-								var _u = me._t(_q);
+								var _u = me.getInstrument(_q);
 								trackEffects.fineTune = {
-									original: _u._af(),
+									original: _u._G(),
 									_u: _u
 								};
 								_u.setFineTune(subValue);
@@ -3316,9 +3373,9 @@ var Tracker = (function(){
 								patternLoopCount[track] = patternLoopCount[track] || 0;
 								if (patternLoopCount[track]<subValue){
 									patternLoopCount[track]++;
-									result.patternBreak = true;
+									result._W = true;
 									result.positionBreak = true;
-									result._ab = songPos.position; // keep on same position
+									result._A = songPos.position; // keep on same position
 									result._y = patternLoopStart[track] || 0; // should we default to 0 if no start was set or just ignore?
 
 									console.log("looping to " + result._y + " for "  + patternLoopCount[track] + "/" + subValue);
@@ -3403,26 +3460,30 @@ var Tracker = (function(){
 				// Note: shouldn't this be "set speed at time" instead of setting it directly?
 				// TODO: -> investigate
 				// TODO: Yes ... this is actually quite wrong FIXME !!!!
+				
+				// Note 2: this hase moved to the beginning of the "row" sequence:
+				// we scan all tracks for tempo changes and set them before processing any other command.
+				// this is consistant with PT and FT
 
-				if (note._i <= 32){
-					//if (note._i == 0) note._i = 1;
-					Tracker._x(note._i,time);
-				}else{
-					Tracker.setBPM(note._i)
-				}
+				//if (note._i < 32){
+				//	//if (note._i == 0) note._i = 1;
+				//	Tracker._x(note._i,time);
+				//}else{
+				//	Tracker.setBPM(note._i)
+				//}
 				break;
 
             case 16:
                 //Fasttracker only - global volume
 				value = Math.min(value,64);
-				Audio.setMasterVolume(value/64,time);
+				if (!me.isPlugin) Audio.setMasterVolume(value/64,time);
                 break;
 			case 17:
 				//Fasttracker only - global volume slide
 
 				x = value >> 4;
 				y = value & 0x0f;
-				var currentVolume = Audio.getLastMasterVolume()*64;
+				var _V = Audio.getLastMasterVolume()*64;
 
 				var amount = 0;
 				if (x){
@@ -3434,7 +3495,7 @@ var Tracker = (function(){
 				}
 
 				if (amount){
-					value = (currentVolume+amount)/64;
+					value = (_V+amount)/64;
 					value = Math.max(0,value);
 					value = Math.min(1,value);
 
@@ -3445,15 +3506,26 @@ var Tracker = (function(){
 			case 20:
 				//Fasttracker only - Key off
 				if (me._j()){
-					offInstrument = _u || me._t(trackNotes[track].currentInstrument);
-					if (offInstrument){
-						volume = offInstrument.noteOff(time,trackNotes[track]);
+					offInstrument = _u || me.getInstrument(trackNotes[track]._Z);
+					if (note._i && note._i>=ticksPerStep){
+						// ignore: delay is too large
 					}else{
-						console.log("no _u on track " + track);
-						volume = 0;
+						doPlayNote = false;
+						if (offInstrument){
+							if (note._i){
+								trackEffects.noteOff = {
+									value: note._i
+								}
+								doPlayNote = true;
+							}else{
+								volume = offInstrument.noteOff(time,trackNotes[track]);
+								defaultVolume = volume;
+							}
+						}else{
+							console.log("no _u on track " + track);
+							defaultVolume = 0;
+						}
 					}
-					defaultVolume = volume;
-					doPlayNote = false;
 				}
 				break;
             case 21:
@@ -3495,12 +3567,12 @@ var Tracker = (function(){
 			}
 
 			//trackNotes[track] = Audio.playSample(_q,notePeriod,volume,track,trackEffects,time,noteIndex);
-			trackEffectCache[track].defaultSlideTarget = trackNotes[track].startPeriod;
+			trackEffectCache[track].$e = trackNotes[track]._U;
 		}
 
 
 		if (_q) {
-			trackNotes[track].currentInstrument =  _q;
+			trackNotes[track]._Z =  _q;
 
 			// reset temporary _u settings
 			if (trackEffects.fineTune && trackEffects.fineTune._u){
@@ -3509,7 +3581,7 @@ var Tracker = (function(){
 		}
 
 		if (_u && _u.hasVibrato()){
-            trackNotes[track]._ar = true;
+            trackNotes[track]._Q = true;
 		}
 
 		trackNotes[track].effects = trackEffects;
@@ -3523,7 +3595,7 @@ var Tracker = (function(){
 		try{
 			if (trackNotes[track].source) {
 				var gain = trackNotes[track].volume.gain;
-				gain.setValueAtTime(trackNotes[track].currentVolume/100,time-0.002);
+				gain.setValueAtTime(trackNotes[track]._V/100,time-0.002);
 				gain.linearRampToValueAtTime(0,time);
 				trackNotes[track].source.stop(time+0.02);
 				//trackNotes[track].source.stop(time);
@@ -3536,7 +3608,7 @@ var Tracker = (function(){
 
 	function applyAutoVibrato(trackNote,currentPeriod){
 
-        var _u = me._t(trackNote._q);
+        var _u = me.getInstrument(trackNote._q);
         if (_u){
             var _freq = -_u._p.rate/40;
             var _amp = _u._p.depth/8;
@@ -3547,7 +3619,7 @@ var Tracker = (function(){
                 var sweepAmp = 1-((_u._p.sweep-trackNote._l)/_u._p.sweep);
                 _amp *= sweepAmp;
             }
-            var _uVibratoFunction = _u._ae();
+            var _uVibratoFunction = _u._D();
             var targetPeriod = _uVibratoFunction(currentPeriod,trackNote._l,_freq,_amp);
             trackNote._l++;
             return targetPeriod
@@ -3568,21 +3640,21 @@ var Tracker = (function(){
 
         trackNote.startVibratoTimer = trackNote._l||0;
 
-        if (trackNote.resetPeriodOnStep && trackNote.source){
+        if (trackNote.$g && trackNote.source){
 			// _p or arpeggio is done
 			// for slow _ps it seems logical to keep the current frequency, but apparently most trackers revert back to the pre-_p one
-			var targetPeriod = trackNote.currentPeriod || trackNote.startPeriod;
-			me.setPeriodAtTime(trackNote,targetPeriod,time);
-			trackNote.resetPeriodOnStep = false;
+			var targetPeriod = trackNote.currentPeriod || trackNote._U;
+			me.$d(trackNote,targetPeriod,time);
+			trackNote.$g = false;
 		}
 
 		if (effects.volume){
 			var volume = effects.volume.value;
 			if (trackNote.volume){
-				//trackNote.startVolume = volume; // apparently the startVolume is not set here but the default volume of the note is used?
+				//trackNote._Y = volume; // apparently the _Y is not set here but the default volume of the note is used?
 				trackNote.volume.gain.setValueAtTime(volume/100,time);
 			}
-			trackNote.currentVolume = volume;
+			trackNote._V = volume;
 		}
 
 		if (effects.panning){
@@ -3595,13 +3667,13 @@ var Tracker = (function(){
 
 		if (effects.fade){
 			value = effects.fade.value;
-			var currentVolume;
+			var _V;
 			var startTick = 1;
 
 			if (effects.fade.resetOnStep){
-				currentVolume = trackNote.startVolume;
+				_V = trackNote._Y;
 			}else{
-				currentVolume = trackNote.currentVolume;
+				_V = trackNote._V;
 			}
 
 			var steps = ticksPerStep;
@@ -3613,20 +3685,20 @@ var Tracker = (function(){
 
 			for (var tick = startTick; tick < steps; tick++){
 				if (trackNote.volume){
-					trackNote.volume.gain.setValueAtTime(currentVolume/100,time + (tick*tickTime));
-					currentVolume += value;
-					currentVolume = Math.max(currentVolume,0);
-					currentVolume = Math.min(currentVolume,100);
+					trackNote.volume.gain.setValueAtTime(_V/100,time + (tick*tickTime));
+					_V += value;
+					_V = Math.max(_V,0);
+					_V = Math.min(_V,100);
 				}
 			}
 
-			trackNote.currentVolume = currentVolume;
+			trackNote._V = _V;
 
 		}
 
 		if (effects.slide){
 			if (trackNote.source){
-				var currentPeriod = trackNote.currentPeriod || trackNote.startPeriod;
+				var currentPeriod = trackNote.currentPeriod || trackNote._U;
 				var targetPeriod = currentPeriod;
 
 
@@ -3641,9 +3713,9 @@ var Tracker = (function(){
 				if (me._j() && me._s) slideValue = effects.slide.value*4;
 				value = Math.abs(slideValue);
 
-				if (me._j() && effects.slide.resetVolume && (trackNote.volumeFadeOut || trackNote._c)){
+				if (me._j() && effects.slide.resetVolume && (trackNote._X || trackNote._c)){
 					// crap ... this should reset the volume envelope to the beginning ... annoying ...
-					var _u = me._t(trackNote._q);
+					var _u = me.getInstrument(trackNote._q);
 					if (_u) _u.resetVolume(time,trackNote);
 
 				}
@@ -3653,7 +3725,7 @@ var Tracker = (function(){
 				// TODO: Why don't we use a RampToValueAtTime here ?
 				for (var tick = 1; tick < steps; tick++){
 					if (effects.slide.target){
-						trackEffectCache[track].defaultSlideTarget = effects.slide.target;
+						trackEffectCache[track].$e = effects.slide.target;
 						if (targetPeriod<effects.slide.target){
 							targetPeriod += value;
 							if (targetPeriod>effects.slide.target) targetPeriod = effects.slide.target;
@@ -3663,7 +3735,7 @@ var Tracker = (function(){
 						}
 					}else{
 						targetPeriod += slideValue;
-						if (trackEffectCache[track].defaultSlideTarget) trackEffectCache[track].defaultSlideTarget += slideValue;
+						if (trackEffectCache[track].$e) trackEffectCache[track].$e += slideValue;
 					}
 
 					if (!me._j()) targetPeriod = Audio.limitAmigaPeriod(targetPeriod);
@@ -3676,11 +3748,11 @@ var Tracker = (function(){
 					if (newPeriod !== trackNote.currentPeriod){
 						trackNote.currentPeriod = targetPeriod;
 
-                        if (trackNote._ar && me._j()){
+                        if (trackNote._Q && me._j()){
                             targetPeriod = applyAutoVibrato(trackNote,targetPeriod);
                             autoVibratoHandled = true;
                         }
-						me.setPeriodAtTime(trackNote,newPeriod,time + (tick*tickTime));
+						me.$d(trackNote,newPeriod,time + (tick*tickTime));
 
 					}
 				}
@@ -3690,10 +3762,10 @@ var Tracker = (function(){
 		if (effects.arpeggio){
 			if (trackNote.source){
 
-				var currentPeriod = trackNote.currentPeriod || trackNote.startPeriod;
+				var currentPeriod = trackNote.currentPeriod || trackNote._U;
 				var targetPeriod;
 
-				trackNote.resetPeriodOnStep = true;
+				trackNote.$g = true;
                 trackNote._l = trackNote.startVibratoTimer;
 
 				for (var tick = 0; tick < ticksPerStep; tick++){
@@ -3703,18 +3775,18 @@ var Tracker = (function(){
 					if (t == 1 && effects.arpeggio.interval1) targetPeriod = currentPeriod - effects.arpeggio.interval1;
 					if (t == 2 && effects.arpeggio.interval2) targetPeriod = currentPeriod - effects.arpeggio.interval2;
 
-                    if (trackNote._ar && me._j()){
+                    if (trackNote._Q && me._j()){
                         targetPeriod = applyAutoVibrato(trackNote,targetPeriod);
                         autoVibratoHandled = true;
                     }
 
-                    me.setPeriodAtTime(trackNote,targetPeriod,time + (tick*tickTime));
+                    me.$d(trackNote,targetPeriod,time + (tick*tickTime));
 
 				}
 			}
 		}
 
-		if (effects._p || (trackNote._ar && !autoVibratoHandled)){
+		if (effects._p || (trackNote._Q && !autoVibratoHandled)){
             effects._p = effects._p || {freq:0,amplitude:0};
 			var freq = effects._p.freq;
 			var amp = effects._p.amplitude;
@@ -3723,23 +3795,23 @@ var Tracker = (function(){
 			trackNote._l = trackNote._l||0;
 
 			if (trackNote.source) {
-				trackNote.resetPeriodOnStep = true;
-				currentPeriod = trackNote.currentPeriod || trackNote.startPeriod;
+				trackNote.$g = true;
+				currentPeriod = trackNote.currentPeriod || trackNote._U;
 
                 trackNote._l = trackNote.startVibratoTimer;
 				for (var tick = 0; tick < ticksPerStep; tick++) {
 					targetPeriod = _pFunction(currentPeriod,trackNote._l,freq,amp);
 
 					// should we add or average the 2 effects?
-					if (trackNote._ar && me._j()){
+					if (trackNote._Q && me._j()){
                         targetPeriod = applyAutoVibrato(trackNote,targetPeriod);
                         autoVibratoHandled = true;
 					}else{
                         trackNote._l++;
 					}
 
-					// TODO: if we ever allow multiple effect on the same tick then we should rework this as you can't have concurrent "setPeriodAtTime" commands
-					me.setPeriodAtTime(trackNote,targetPeriod,time + (tick*tickTime));
+					// TODO: if we ever allow multiple effect on the same tick then we should rework this as you can't have concurrent "$d" commands
+					me.$d(trackNote,targetPeriod,time + (tick*tickTime));
 
 				}
 			}
@@ -3752,7 +3824,7 @@ var Tracker = (function(){
 			trackNote.tremoloTimer = trackNote.tremoloTimer||0;
 
 			if (trackNote.volume) {
-				var _volume = trackNote.startVolume;
+				var _volume = trackNote._Y;
 
 				for (var tick = 0; tick < ticksPerStep; tick++) {
 
@@ -3762,7 +3834,7 @@ var Tracker = (function(){
 					if (_volume>100) _volume=100;
 
 					trackNote.volume.gain.setValueAtTime(_volume/100,time + (tick*tickTime));
-					trackNote.currentVolume = _volume;
+					trackNote._V = _volume;
 					trackNote.tremoloTimer++;
 				}
 			}
@@ -3773,13 +3845,20 @@ var Tracker = (function(){
 			if (trackNote.volume) {
 				trackNote.volume.gain.setValueAtTime(0,time + (effects.cutNote.value*tickTime));
 			}
-			trackNote.currentVolume = 0;
+			trackNote._V = 0;
+		}
+
+		if (effects.noteOff){
+			var _u = me.getInstrument(trackNote._q);
+			if (_u){
+				trackNote._V = _u.noteOff(time + (effects.noteOff.value*tickTime),trackNote);
+			}
 		}
 
 		if (effects.reTrigger){
 			var _q = trackNote._q;
-			var notePeriod = trackNote.startPeriod;
-			volume = trackNote.startVolume;
+			var notePeriod = trackNote._U;
+			volume = trackNote._Y;
 			var noteIndex = trackNote.noteIndex;
 
 			var _oStep = effects.reTrigger.value || 1;
@@ -3797,27 +3876,40 @@ var Tracker = (function(){
 
 
 
-	me.setBPM = function(newBPM){
-		console.log("set BPM: " + bpm + " to " + newBPM);
-		if (clock) clock.timeStretch(Audio.context.currentTime, [mainTimer], bpm / newBPM);
-		bpm = newBPM;
-		tickTime = 2.5/bpm;
-		EventBus._o(EVENT.songBPMChange,bpm);
+	me.setBPM = function(newBPM,sender){
+		var fromMaster = (sender && sender.isMaster); 
+		if (me.isMaster || fromMaster){
+			console.log("set BPM: " + bpm + " to " + newBPM);
+			if (clock) clock.timeStretch(Audio.context.currentTime, [mainTimer], bpm / newBPM);
+			if (!fromMaster) EventBus._o(EVENT.songBPMChangeIgnored,bpm);
+			bpm = newBPM;
+			tickTime = 2.5/bpm;
+			EventBus._o(EVENT.songBPMChange,bpm);
+		}else{
+			EventBus._o(EVENT.songBPMChangeIgnored,newBPM);
+		}
 	};
-
+	
 	me.getBPM = function(){
 		return bpm;
 	};
 
-	me._x = function(speed){
+	me._x = function(speed,sender){
 		// 1 tick is 0.02 seconds on a PAL Amiga
 		// 4 steps is 1 beat
 		// the speeds sets the amount of ticks in 1 step
 		// default is 6 -> 60/(6*0.02*4) = 125 bpm
 
-		//note: this changes the speed of the song, but not the speed of the main loop
-        ticksPerStep = speed;
+		var fromMaster = (sender && sender.isMaster);
+		if (me.isMaster || fromMaster){
+			//note: this changes the speed of the song, but not the speed of the main loop
+			ticksPerStep = speed;
+			EventBus._o(EVENT.songSpeedChange,speed);
+		}else{
+			EventBus._o(EVENT.songSpeedChangeIgnored,speed);
+		}
 
+		
 	};
 
 	me.getAmigaSpeed = function(){
@@ -3854,7 +3946,7 @@ var Tracker = (function(){
 		}else{
 			song.patterns[currentPattern] = song.patterns[currentPattern].splice(0,patternLength);
 			if (currentPatternPos>=patternLength){
-				me._ad(patternLength-1);
+				me._C(patternLength-1);
 			}
 		}
 
@@ -3862,7 +3954,7 @@ var Tracker = (function(){
 		EventBus._o(EVENT.patternChange,currentPattern);
 	};
 
-	me.getTrackCount = function(){
+	me.$b = function(){
 		return trackCount;
 	};
 
@@ -3909,7 +4001,7 @@ var Tracker = (function(){
 		return trackerStates;
 	};
 
-	me.setPeriodAtTime = function(trackNote,_b,time){
+	me.$d = function(trackNote,_b,time){
         // TODO: shouldn't we always set the full samplerate from the _b?
 
 		_b = Math.max(_b,1);
@@ -3918,7 +4010,7 @@ var Tracker = (function(){
             var sampleRate = (8363 * Math.pow(2,((4608 - _b) / 768)));
             var rate = sampleRate / Audio.context.sampleRate;
         }else{
-            rate = (trackNote.startPeriod / _b);
+            rate = (trackNote._U / _b);
             rate = trackNote.startPlaybackRate * rate;
         }
 
@@ -3929,7 +4021,7 @@ var Tracker = (function(){
         trackNote.source.playbackRate.setValueAtTime(rate,time + 0.005);
 	};
 
-	me.load = function(url,skipHistory,next){
+	me.load = function(url,skipHistory,next,initial){
 		url = url || "demomods/StardustMemories.mod";
 
 		if (url.indexOf("://")<0 && url.indexOf("/") !== 0) url = Host.getBaseUrl() + url;
@@ -3940,6 +4032,10 @@ var Tracker = (function(){
 		}
 
 		var process=function(result){
+
+			// initial file is overridden by a load command of the host;
+			if (initial && !Host.useInitialLoad) return;
+
 			me.processFile(result,_a,function(isMod){
 				if (UI) UI.setStatus("Ready");
 
@@ -4037,8 +4133,8 @@ var Tracker = (function(){
 			console.log("extracting zip file");
 
 			if (UI) UI.setStatus("Extracting Zip file",true);
-			// using UZIP: https://github.com/photopea/UZIP.js
 			if (typeof UZIP !== "undefined") {
+				// using UZIP: https://github.com/photopea/UZIP.js
 				var myArchive = UZIP.parse(arrayBuffer);
 				console.log(myArchive);
 				for (var _a in myArchive) {
@@ -4046,43 +4142,40 @@ var Tracker = (function(){
 					break; // just use first entry
 				}
 			} else {
-				console.error("no ZIP library found");
-				return false;
-			}
-			/* old ZIP lib, but with worker possibility
-			zip.workerScriptsPath = "script/src/lib/zip/";
-			zip.useWebWorkers = Host.useWebWorkers;
-
-			//ArrayBuffer Reader and Write additions: https://github.com/gildas-lormeau/zip.js/issues/21
-
-			zip.createReader(new zip.ArrayBufferReader(arrayBuffer), function(reader) {
-				var zipEntry;
-				var size = 0;
-				reader.getEntries(function(entries) {
-					if (entries && entries.length){
-						entries.forEach(function(entry){
-							if (entry.uncompressedSize>size){
-								size = entry.uncompressedSize;
-								zipEntry = entry;
-							}
-						});
-					}
-					if (zipEntry){
-						zipEntry.getData(new zip.ArrayBufferWriter,function(data){
-							if (data && data.byteLength) {
-								me.processFile(data,_a,next);
-							}
-						})
-					}else{
-						console.error("Zip file could not be read ...");
-						if (next) next(false);
-					}
+				// if UZIP wasn't loaded use zip.js
+				zip.workerScriptsPath = "script/src/lib/zip/";
+				zip.useWebWorkers = Host.useWebWorkers;
+	
+				//ArrayBuffer Reader and Write additions: https://github.com/gildas-lormeau/zip.js/issues/21
+	
+				zip.createReader(new zip.ArrayBufferReader(arrayBuffer), function(reader) {
+					var zipEntry;
+					var size = 0;
+					reader.getEntries(function(entries) {
+						if (entries && entries.length){
+							entries.forEach(function(entry){
+								if (entry.uncompressedSize>size){
+									size = entry.uncompressedSize;
+									zipEntry = entry;
+								}
+							});
+						}
+						if (zipEntry){
+							zipEntry.getData(new zip.ArrayBufferWriter,function(data){
+								if (data && data.byteLength) {
+									me.processFile(data,_a,next);
+								}
+							})
+						}else{
+							console.error("Zip file could not be read ...");
+							if (next) next(false);
+						}
+					});
+				}, function(error) {
+					console.error("Zip file could not be read ...");
+					if (next) next(false);
 				});
-			}, function(error) {
-				console.error("Zip file could not be read ...");
-				if (next) next(false);
-			});
-			*/
+			}
 		}
 
 		if (result.isMod && result.loader){
@@ -4112,11 +4205,11 @@ var Tracker = (function(){
 		return song;
 	};
 
-	me._ts = function(){
+	me.getInstruments = function(){
 		return _us;
 	};
 
-	me._t = function(index){
+	me.getInstrument = function(index){
 		return _us[index];
 	};
 
@@ -4137,8 +4230,8 @@ var Tracker = (function(){
 		prevSongPosition = undefined;
 
 		me.setCurrentSongPosition(0);
-		me._ad(0);
-		me.setCurrentInstrumentIndex(1);
+		me._C(0);
+		me._S(1);
 
 		me.clearEffectCache();
 
@@ -4147,6 +4240,8 @@ var Tracker = (function(){
 	}
 
 	function resetDefaultSettings(){
+		EventBus._o(EVENT.songBPMChangeIgnored,0);
+		EventBus._o(EVENT.songSpeedChangeIgnored,0);
 		me._x(6);
 		me.setBPM(125);
 
@@ -4160,9 +4255,10 @@ var Tracker = (function(){
 			trackEffectCache.push({});
 		}
 		me._s = false;
-		me._as(TRACKERMODE.PROTRACKER);
-		Audio.setMasterVolume(1);
+		me._R(TRACKERMODE.PROTRACKER,true);
+		if (!me.isPlugin) Audio.setMasterVolume(1);
 		Audio.setAmigaLowPassFilter(false,0);
+		if (typeof StateManager !== "undefined") StateManager.clear();
 	}
 
 	me.clearEffectCache = function(){
@@ -4173,7 +4269,7 @@ var Tracker = (function(){
 		}
 	};
 
-	me.clearInstruments = function(count){
+	me.$a = function(count){
 		if (!song) return;
 		var _uContainer = [];
 		var max  = count || song._us.length-1;
@@ -4185,13 +4281,31 @@ var Tracker = (function(){
 		song._us = _us;
 
 		EventBus._o(EVENT._uListChange,_uContainer);
-		EventBus._o(EVENT._uChange,currentInstrumentIndex);
+		EventBus._o(EVENT._uChange,_ZIndex);
 	};
 
-	me._as = function(mode){
-		trackerMode = mode;
-        SETTINGS._ac = !me._j();
-		EventBus._o(EVENT.trackerModeChanged,mode);
+	me._R = function(mode,force){
+
+		var doChange = function(){
+			trackerMode = mode;
+			SETTINGS._B = !me._j();
+			EventBus._o(EVENT.trackerModeChanged,mode);
+		}
+
+		//do some validation when changing from FT to MOD
+		if (mode === TRACKERMODE.PROTRACKER && !force){
+			if (Tracker.getInstruments().length>32){
+				UI.showDialog("WARNING !!!//This file has more than 31 _us./If you save this file as .MOD, only the first 31 _us will be included.//Are you sure you want to continue?",function(){
+					doChange();
+				},function(){
+
+				});
+			}else{
+				doChange();
+			}
+		}else{
+			doChange();
+		}
 	};
 	me.getTrackerMode = function(){
 		return trackerMode;
@@ -4207,12 +4321,12 @@ var Tracker = (function(){
 			patterns:[],
 			_us:[]
 		};
-        me.clearInstruments(31);
+        me.$a(31);
 
 		song.typeId = "M.K.";
 		song.title = "new song";
 		song.length = 1;
-		song._ak = 0;
+		song._L = 0;
 
 		song.patterns.push(getEmptyPattern());
 
@@ -4227,9 +4341,9 @@ var Tracker = (function(){
 
 
 	me.clearInstrument = function(){
-		_us[currentInstrumentIndex]=Instrument();
-		EventBus._o(EVENT._uChange,currentInstrumentIndex);
-		EventBus._o(EVENT._uNameChange,currentInstrumentIndex);
+		_us[_ZIndex]=Instrument();
+		EventBus._o(EVENT._uChange,_ZIndex);
+		EventBus._o(EVENT._uNameChange,_ZIndex);
 	};
 
 	me.getFileName = function(){
@@ -4378,7 +4492,7 @@ var FetchService = (function() {
 
 		var url = config.url;
 
-		if (typeof config.cache === "boolean" && !config.cache && Host.useUrlParams){
+		if (typeof config.cache === "boolean" && !config.cache && Host.$f){
 			var r = new Date().getTime();
 			url += url.indexOf("?")>0 ? "&r=" + r : "?r=" + r;
 		}
@@ -4444,15 +4558,13 @@ var FileDetector = function(){
 
 	me.detect = function(file,_a){
 		var length = file.length;
-
-		var zipId = file._v(2,0);
-		if (zipId == "PK") return fileType.zip;
-
 		var id = "";
+
 		id = file._v(17,0);
 		if (id == "Extended Module: "){
 			return fileType.mod_FastTracker;
 		}
+
 
 		if (length>1100){
 			id = file._v(4,1080); // M.K.
@@ -4488,6 +4600,8 @@ var FileDetector = function(){
 		if (ext == ".iff") return fileType.sample;
 		if (ext == ".zip") return fileType.zip;
 
+		var zipId = file._v(2,0);
+		if (zipId == "PK") return fileType.zip;
 
 
 
@@ -4542,20 +4656,19 @@ var FileDetector = function(){
 	};
 
 	return me;
-}();
-;
+}();;
 var ProTracker = function(){
 	var me = {};
 
 	me.load = function(file,_a){
 
-		Tracker._as(TRACKERMODE.PROTRACKER);
+		Tracker._R(TRACKERMODE.PROTRACKER,true);
         Tracker._s = false;
-        Tracker.clearInstruments(31);
+        Tracker.$a(31);
 
 		var song = {
 			patterns:[],
-			_ak: 1
+			_L: 1
 		};
 
 		var patternLength = 64;
@@ -4596,6 +4709,7 @@ var ProTracker = function(){
 
 			_u.sample.length = _u.sample.realLen = sampleLength << 1;
 			var finetune = file._e();
+			if (finetune>16) finetune = finetune%16;
 			if (finetune>7) finetune -= 16;
 			_u.setFineTune(finetune);
 			_u.sample.volume   = file._e();
@@ -4609,9 +4723,11 @@ var ProTracker = function(){
 			sampleDataOffset += _u.sample.length;
 			_u.setSampleIndex(0);
 			Tracker.setInstrument(i,_u);
+
 			
 		}
-		song._us = Tracker._ts();
+		song._us = Tracker.getInstruments();
+
 
 		file.goto(950);
 		song.length = file._e();
@@ -4650,7 +4766,7 @@ var ProTracker = function(){
 
 				// fill with empty data for other channels
 				// TODO: not needed anymore ?
-				for (channel = channelCount; channel < Tracker.getTrackCount(); channel++){
+				for (channel = channelCount; channel < Tracker.$b(); channel++){
 					row.push(Note())
 				}
 
@@ -4665,7 +4781,7 @@ var ProTracker = function(){
 		var _uContainer = [];
 
 		for(i=1; i <= _uCount; i++) {
-			_u = Tracker._t(i);
+			_u = Tracker.getInstrument(i);
 			if (_u){
 				console.log(
 					"Reading sample from 0x" + file.index + " with length of " + _u.sample.length + " bytes and repeat length of " + _u.sample.loop.length);
@@ -4736,13 +4852,13 @@ var SoundTracker = function(){
 
 	me.load = function(file,_a){
 
-		Tracker._as(TRACKERMODE.PROTRACKER);
+		Tracker._R(TRACKERMODE.PROTRACKER,true);
         Tracker._s = false;
-		Tracker.clearInstruments(15);
+		Tracker.$a(15);
 
 		var song = {
 			patterns:[],
-			_ak: 1
+			_L: 1
 		};
 
 		var patternLength = 64;
@@ -4783,7 +4899,7 @@ var SoundTracker = function(){
 			Tracker.setInstrument(i,_u);
 
 		}
-		song._us = Tracker._ts();
+		song._us = Tracker.getInstruments();
 
 		file.goto(470);
 
@@ -4822,7 +4938,7 @@ var SoundTracker = function(){
 				}
 
 				// fill with empty data for other channels
-				for (channel = 4; channel < Tracker.getTrackCount(); channel++){
+				for (channel = 4; channel < Tracker.$b(); channel++){
 					row.push({note:0,effect:0,_u:0,_i:0});
 				}
 
@@ -4836,7 +4952,7 @@ var SoundTracker = function(){
 		var _uContainer = [];
 
 		for(i=1; i <= _uCount; i++) {
-			_u = Tracker._t(i);
+			_u = Tracker.getInstrument(i);
 			if (_u){
 				console.log("Reading sample from 0x" + file.index + " with length of " + _u.sample.length + " bytes and repeat length of " + _u.sample.loop.length);
 
@@ -4866,8 +4982,8 @@ var FastTracker = function(){
     me.load = function(file,_a){
 
         console.log("loading FastTracker");
-        Tracker._as(TRACKERMODE.FASTTRACKER);
-		Tracker.clearInstruments(1);
+        Tracker._R(TRACKERMODE.FASTTRACKER,true);
+		Tracker.$a(1);
 
         var mod = {};
         var song = {
@@ -4875,7 +4991,7 @@ var FastTracker = function(){
 			_us:[]
         };
 
-        file._am = true;
+        file._N = true;
 
         file.goto(17);
         song.title = file._v(20);
@@ -4884,9 +5000,9 @@ var FastTracker = function(){
         mod.trackerName = file._v(20);
         mod.trackerVersion = file.readByte();
         mod.trackerVersion = file.readByte() + "." + mod.trackerVersion;
-        mod.headerSize = file.readDWord(); // is this always 276?
+        mod.headerSize = file.$c(); // is this always 276?
         mod.songlength = file._g();
-        mod._ak = file._g();
+        mod._L = file._g();
         mod.numberOfChannels = file._g();
         mod.numberOfPatterns = file._g(); // this is sometimes more then the actual number? should we scan for highest pattern? -> YES! -> NO!
         mod.numberOfInstruments = file._g();
@@ -4912,7 +5028,7 @@ var FastTracker = function(){
         song.patternTable = patternTable;
         song.length = mod.songlength;
         song.channels = mod.numberOfChannels;
-        song._ak = (mod._ak + 1);
+        song._L = (mod._L + 1);
 
         var fileStartPos = 60 + mod.headerSize;
         file.goto(fileStartPos);
@@ -4923,7 +5039,7 @@ var FastTracker = function(){
             var patternData = [];
             var thisPattern = {};
 
-            thisPattern.headerSize = file.readDWord();
+            thisPattern.headerSize = file.$c();
             thisPattern.packingType = file._e(); // always 0
             thisPattern.patternLength = file._g();
             thisPattern.patternSize = file._g();
@@ -4941,13 +5057,13 @@ var FastTracker = function(){
                     if (v & 128) {
                         if (v &  1) note.setIndex(file._e());
                         if (v &  2) note._u = file._e();
-                        if (v &  4) note.volumeEffect = file._e();
+                        if (v &  4) note._T = file._e();
                         if (v &  8) note.effect = file._e();
                         if (v & 16) note._i  = file._e();
                     } else {
                         note.setIndex(v);
                         note._u = file._e();
-                        note.volumeEffect = file._e();
+                        note._T = file._e();
                         note.effect = file._e();
                         note._i  = file._e();
                     }
@@ -4974,24 +5090,24 @@ var FastTracker = function(){
 
 			try{
 				_u.filePosition = file.index;
-				_u.headerSize = file.readDWord();
+				_u.headerSize = file.$c();
 
 				_u._a = file._v(22);
 				_u.type = file._e();
-				_u._aj = file._g();
+				_u._K = file._g();
 				_u.samples = [];
-				_u._al = 0;
+				_u._M = 0;
 
-				if (_u._aj>0){
-					_u._al = file.readDWord();
+				if (_u._K>0){
+					_u._M = file.$c();
 
 					// some files report incorrect sampleheadersize (18, without the sample_a)
 					// e.g. dubmood - cybernostra weekends.xm
 					// sample header should be at least 40 bytes
-					_u._al = Math.max(_u._al,40);
+					_u._M = Math.max(_u._M,40);
 
 					// and not too much ... (Files saved with sk@letracker)
-					if (_u._al>200) _u._al=40;
+					if (_u._M>200) _u._M=40;
 
 					//should we assume it's always 40? not according to specs ...
 
@@ -5002,12 +5118,12 @@ var FastTracker = function(){
 
 					_u._c.count = file._e();
 					_u._d.count = file._e();
-					_u._c._ag = file._e();
+					_u._c._H = file._e();
 					_u._c._w = file._e();
-					_u._c._ai = file._e();
-					_u._d._ag = file._e();
+					_u._c._J = file._e();
+					_u._d._H = file._e();
 					_u._d._w = file._e();
-					_u._d._ai = file._e();
+					_u._d._J = file._e();
 					_u._c.type = file._e();
 					_u._d.type = file._e();
 					_u._p.type = file._e();
@@ -5050,7 +5166,7 @@ var FastTracker = function(){
             file.goto(fileStartPos);
 
 
-            if (_u._aj === 0){
+            if (_u._K === 0){
                 var sample = Sample();
                 _u.samples.push(sample);
             }else{
@@ -5060,12 +5176,12 @@ var FastTracker = function(){
                     break;
                 }
 
-                for (var sampleI = 0; sampleI < _u._aj; sampleI++){
+                for (var sampleI = 0; sampleI < _u._K; sampleI++){
                     sample = Sample();
 
-                    sample.length = file.readDWord();
-                    sample.loop.start = file.readDWord();
-                    sample.loop.length = file.readDWord();
+                    sample.length = file.$c();
+                    sample.loop.start = file.$c();
+                    sample.loop.length = file.$c();
                     sample.volume = file._e();
                     sample.finetuneX = file.readByte();
                     sample.type = file._e();
@@ -5076,12 +5192,12 @@ var FastTracker = function(){
                     sample.bits = 8;
 
                     _u.samples.push(sample);
-                    fileStartPos += _u._al;
+                    fileStartPos += _u._M;
 
                     file.goto(fileStartPos);
                 }
 
-                for (sampleI = 0; sampleI < _u._aj; sampleI++){
+                for (sampleI = 0; sampleI < _u._K; sampleI++){
                     sample = _u.samples[sampleI];
                     if (!sample.length) continue;
 
@@ -5147,7 +5263,7 @@ var FastTracker = function(){
 
         }
         EventBus._o(EVENT._uListChange,_uContainer);
-        song._us = Tracker._ts();
+        song._us = Tracker.getInstruments();
 
         Tracker.setBPM(mod.defaultBPM);
         Tracker._x(mod.defaultTempo);
@@ -5231,7 +5347,7 @@ var Instrument = function(){
 
 	me.play = function(noteIndex,notePeriod,volume,track,trackEffects,time){
 		if (Tracker._j()) {
-			notePeriod = me._an(noteIndex);
+			notePeriod = me._O(noteIndex);
 		}
 		return Audio.playSample(me._q,notePeriod,volume,track,trackEffects,time,noteIndex);
 	};
@@ -5258,7 +5374,7 @@ var Instrument = function(){
 		if (me._p.rate && me._p.depth){
 			scheduled.ticks = 0;
 			scheduled._p = time;
-			scheduled._pFunction = me._ae();
+			scheduled._pFunction = me._D();
 		}
 
 		return {volume: _c, panning: _d, scheduled: scheduled};
@@ -5270,7 +5386,7 @@ var Instrument = function(){
 		function cancelScheduledValues(){
 			// Note: we should cancel Volume and Panning scheduling independently ...
 			noteInfo.volume.gain.cancelScheduledValues(time);
-			noteInfo.volumeFadeOut.gain.cancelScheduledValues(time);
+			noteInfo._X.gain.cancelScheduledValues(time);
 
 			if (noteInfo._c) noteInfo._c.gain.cancelScheduledValues(time);
 			if (noteInfo._d) noteInfo._d.pan.cancelScheduledValues(time);
@@ -5286,9 +5402,9 @@ var Instrument = function(){
 				if (me._c.sustain && noteInfo._c){
 					cancelScheduledValues();
 					var timeOffset = 0;
-					var startPoint = me._c.points[me._c._ag];
+					var startPoint = me._c.points[me._c._H];
 					if (startPoint) timeOffset = startPoint[0]*tickTime;
-					for (var p = me._c._ag; p< me._c.count;p++){
+					for (var p = me._c._H; p< me._c.count;p++){
 						var point = me._c.points[p];
 						if (point) noteInfo._c.gain.linearRampToValueAtTime(point[1]/64,time + (point[0]*tickTime) - timeOffset);
 					}
@@ -5296,19 +5412,19 @@ var Instrument = function(){
 
 				if (me.fadeout){
 					var fadeOutTime = (65536/me.fadeout) * tickTime / 2;
-					noteInfo.volumeFadeOut.gain.linearRampToValueAtTime(0,time + fadeOutTime);
+					noteInfo._X.gain.linearRampToValueAtTime(0,time + fadeOutTime);
 				}
 
 			}else{
 				cancelScheduledValues();
-				noteInfo.volumeFadeOut.gain.linearRampToValueAtTime(0,time + 0.1)
+				noteInfo._X.gain.linearRampToValueAtTime(0,time + 0.1)
 			}
 
             if (me._d.enabled && Audio.usePanning && noteInfo._d){
                 timeOffset = 0;
-                startPoint = me._d.points[me._d._ag];
+                startPoint = me._d.points[me._d._H];
                 if (startPoint) timeOffset = startPoint[0]*tickTime;
-                for (p = me._d._ag; p< me._d.count;p++){
+                for (p = me._d._H; p< me._d.count;p++){
                     point = me._d.points[p];
                     if (point) noteInfo._d.pan.linearRampToValueAtTime((point[1]-32)/32,time + (point[0]*tickTime) - timeOffset);
                 }
@@ -5329,18 +5445,18 @@ var Instrument = function(){
 
 	function processEnvelop(envelope,audioNode,time){
 		var tickTime = Tracker.getProperties().tickTime;
-		var maxPoint = envelope.sustain ? envelope._ag+1 : envelope.count;
+		var maxPoint = envelope.sustain ? envelope._H+1 : envelope.count;
 
 		// some XM files seem to have loop points outside the range.
 		// e.g. springmellow_p_ii.xm - _u 15;
 		envelope._w = Math.min(envelope._w,envelope.count-1);
-		envelope._ai = Math.min(envelope._ai,envelope.count-1);
+		envelope._J = Math.min(envelope._J,envelope.count-1);
 
-		var doLoop = envelope.loop && (envelope._w<envelope._ai);
-		if (envelope.sustain && envelope._ag<=envelope._w) doLoop=false;
+		var doLoop = envelope.loop && (envelope._w<envelope._J);
+		if (envelope.sustain && envelope._H<=envelope._w) doLoop=false;
 
 
-		if (doLoop) maxPoint = envelope._ai+1;
+		if (doLoop) maxPoint = envelope._J+1;
 		var scheduledTime = 0;
 		var lastX = 0;
 
@@ -5395,11 +5511,11 @@ var Instrument = function(){
 		var point = envelope.points[envelope._w];
 		var loopStartX = point[0];
 
-		var doLoop = envelope.loop && (envelope._w<envelope._ai);
+		var doLoop = envelope.loop && (envelope._w<envelope._J);
 		if (doLoop){
 			while (scheduledTime < seconds){
 				var startScheduledTime = scheduledTime;
-				for (var p = envelope._w; p<=envelope._ai;p++){
+				for (var p = envelope._w; p<=envelope._J;p++){
 					point = envelope.points[p];
 					scheduledTime = startScheduledTime + ((point[0]-loopStartX)*tickTime);
 					audioParam.linearRampToValueAtTime((point[1]-center)/max,startTime + scheduledTime);
@@ -5424,7 +5540,7 @@ var Instrument = function(){
 
 		var currentPeriod,_pFunction,time,tick;
 		if (note.source) {
-			currentPeriod = note.startPeriod;
+			currentPeriod = note._U;
 			_pFunction = note.scheduled._pFunction || Audio._r.sine;
 			time = note.scheduled._p || Audio.context.currentTime;
 			tick = 0;
@@ -5441,7 +5557,7 @@ var Instrument = function(){
                 }
 
 				var targetPeriod = _pFunction(currentPeriod,note.scheduled.ticks,freq,amp*sweepAmp);
-				Tracker.setPeriodAtTime(note,targetPeriod,time + (tick*tickTime));
+				Tracker.$d(note,targetPeriod,time + (tick*tickTime));
 				tick++;
 			}
 			note.scheduled.ticks++;
@@ -5450,7 +5566,7 @@ var Instrument = function(){
 		return scheduledTime;
 	};
 
-	me._ae = function(){
+	me._D = function(){
         switch(me._p.type){
             case 1: return Audio._r.square;
             case 2: return Audio._r.saw;
@@ -5460,16 +5576,16 @@ var Instrument = function(){
 	};
 
 	me.resetVolume = function(time,noteInfo){
-        if (noteInfo.volumeFadeOut) {
-            noteInfo.volumeFadeOut.gain.cancelScheduledValues(time);
-            noteInfo.volumeFadeOut.gain.setValueAtTime(1, time);
+        if (noteInfo._X) {
+            noteInfo._X.gain.cancelScheduledValues(time);
+            noteInfo._X.gain.setValueAtTime(1, time);
         }
 
         if (noteInfo._c){
             noteInfo._c.gain.cancelScheduledValues(time);
             var tickTime = Tracker.getProperties().tickTime;
 
-            var maxPoint = me._c.sustain ? me._c._ag+1 :  me._c.count;
+            var maxPoint = me._c.sustain ? me._c._H+1 :  me._c.count;
             noteInfo._c.gain.setValueAtTime(me._c.points[0][1]/64,time);
             for (var p = 1; p<maxPoint;p++){
                 var point = me._c.points[p];
@@ -5478,7 +5594,7 @@ var Instrument = function(){
 		}
 	};
 
-	me._af = function(){
+	me._G = function(){
 		return Tracker._j() ? me.sample.finetuneX : me.sample.finetune;
 	};
 
@@ -5487,23 +5603,23 @@ var Instrument = function(){
 			me.sample.finetuneX = finetune;
 			me.sample.finetune = finetune >> 4;
 		}else{
-            if (finetune>7) finetune = finetune-15;
+            if (finetune>7) finetune = finetune-16;
 			me.sample.finetune = finetune;
 			me.sample.finetuneX = finetune << 4;
 		}
 	};
 
 	// in FT mode
-	me._an = function(noteIndex,withFineTune){
+	me._O = function(noteIndex,withFineTune){
 		var result = 0;
 
 		if (Tracker._s){
 			result =  7680 - (noteIndex-1)*64;
-			if (withFineTune) result -= me._af()/2;
+			if (withFineTune) result -= me._G()/2;
 		}else{
 			result = FTNotes[noteIndex]._b;
-			if (withFineTune && me._af()){
-				result = Audio._ap(noteIndex,me._af());
+			if (withFineTune && me._G()){
+				result = Audio._E(noteIndex,me._G());
 			}
 		}
 
@@ -5581,7 +5697,7 @@ var Note = function(){
 	me.effect = 0;
 	me._u = 0;
 	me._i = 0;
-	me.volumeEffect = 0;
+	me._T = 0;
 
 
 	me.setPeriod = function(_b){
@@ -5607,7 +5723,7 @@ var Note = function(){
 		me.effect = 0;
 		me._i = 0;
 		me.index = 0;
-		me.volumeEffect = 0;
+		me._T = 0;
 	};
 
 	me.duplicate = function(){
@@ -5616,7 +5732,7 @@ var Note = function(){
 			_b : me._b,
 			effect: me.effect,
 			_i: me._i,
-			volumeEffect: me.volumeEffect,
+			_T: me._T,
 			note: me.index
 		}
 	};
@@ -5626,7 +5742,7 @@ var Note = function(){
 			me._b = data._b|| 0;
 			me.effect = data.effect || 0;
 			me._i = data._i || 0;
-			me.volumeEffect =  data.volumeEffect || 0;
+			me._T =  data._T || 0;
 			me.index =  data.note || data.index || 0;
 	};
 
@@ -5640,10 +5756,26 @@ return {
         stop: Tracker.stop,
         togglePlay: Tracker.togglePlay,
         isPlaying: Tracker.isPlaying,
-        getTrackCount: Tracker.getTrackCount,
+        $b: Tracker.$b,
         getSong: Tracker.getSong,
+        getInstruments: Tracker.getInstruments,
         getStateAtTime: Tracker.getStateAtTime,
+        getTimeStates: Tracker.getTimeStates,
         setCurrentSongPosition: Tracker.setCurrentSongPosition,
+        setBPM: Tracker.setBPM,
+        getBPM: Tracker.getBPM,
+        _x: Tracker._x,
+        getAmigaSpeed: Tracker.getAmigaSpeed,
+        setMaster: Tracker.setMaster,
+        isMaster: Tracker.isMaster,
         audio: Audio
     };
-})();
+});
+
+
+if (typeof HostBridge === "undefined" || !HostBridge.customConfig){
+    BassoonTracker = BassoonTracker();
+}
+
+
+

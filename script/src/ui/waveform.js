@@ -1,6 +1,7 @@
 UI.WaveForm = function(){
 
 	var me = UI.element();
+	me.name = "Waveform";
 	var currentSampleData;
 	var currentInstrument;
 	var isPlaying;
@@ -11,8 +12,8 @@ UI.WaveForm = function(){
 	var sampleLength;
 	var dragRangeStart;
 	var dragRangeEnd;
-	var rangeStart = 0;
-	var rangeEnd = 0;
+	var rangeStart = -1;
+	var rangeEnd = -1;
 	var rangeLength = 0;
 	var dragMarker = 0;
 	var activeDragMarker = 0;
@@ -25,7 +26,6 @@ UI.WaveForm = function(){
 	var hasHorizontalScrollBar;
 	var ignoreInstrumentChange;
 	var rangeCache = [];
-	var initPlayingOffset = 0;
 	var playingOffset = 0;
 
 	var MARKERTYPE = {
@@ -92,6 +92,25 @@ UI.WaveForm = function(){
 		if (!me.isVisible()) return;
 		me.refresh();
 	});
+	
+	
+	me.scroll = function(delta){
+		var newPos = scrollBar.left + delta;
+		var min = 1;
+		var max = me.width - scrollBar.width - 1;
+
+		newPos = Math.max(newPos,min);
+		newPos = Math.min(newPos,max);
+
+		scrollBar.setPosition(newPos,scrollBar.top);
+
+		var range = newPos/(max-min);
+		zoomLength = zoomEnd - zoomStart;
+		zoomStart = Math.floor((sampleLength-zoomLength) * range);
+		zoomEnd = zoomStart + zoomLength;
+		waveformDisplay.refresh();
+		
+	}
 
 	me.onDragStart = function(touchData){
 
@@ -124,7 +143,7 @@ UI.WaveForm = function(){
 			}
 		}
 
-		if (rangeStart){
+		if (rangeStart>=0){
 			markerX = getRangeMarkerPos(MARKERTYPE.rangeStart);
 			if (Math.abs(x-markerX)<5){
 				dragMarker = MARKERTYPE.rangeStart;
@@ -171,14 +190,17 @@ UI.WaveForm = function(){
 			}
 
 			EventBus.trigger(EVENT.samplePropertyChange,newProps);
-			//me.refresh();
+			me.refresh();
 			return;
 		}
+
 
 		if (dragMarker && (dragMarker === MARKERTYPE.rangeStart || dragMarker === MARKERTYPE.rangeEnd)){
 			activeDragMarker = dragMarker;
 			delta = touchData.deltaX;
 			value = dragMarkerStart + Math.round(pixelValue*delta);
+
+
 
 			if (dragMarker === MARKERTYPE.rangeStart){
 				value = Math.min(value,sampleLength-2);
@@ -204,6 +226,7 @@ UI.WaveForm = function(){
 
 		dragRangeEnd = touchData.x;
 		rangeEnd = Math.round(zoomStart + (dragRangeEnd * pixelValue));
+		rangeEnd = Math.max(rangeEnd,0);
 		rangeLength = rangeEnd - rangeStart;
 
 		EventBus.trigger(EVENT.samplePropertyChange,{
@@ -243,7 +266,7 @@ UI.WaveForm = function(){
 			var x = me.eventX;
 			var y = me.eventY;
 
-			if (rangeStart){
+			if (rangeStart>=0){
 				markerX = getRangeMarkerPos(MARKERTYPE.rangeStart);
 				if (Math.abs(x-markerX)<5){
 					activeDragMarker = MARKERTYPE.rangeStart;
@@ -252,7 +275,7 @@ UI.WaveForm = function(){
 				}
 			}
 
-			if (rangeEnd){
+			if (rangeEnd>=0){
 				var markerX = getRangeMarkerPos(MARKERTYPE.rangeEnd);
 				if (Math.abs(x-markerX)<5){
 					activeDragMarker = MARKERTYPE.rangeEnd;
@@ -310,23 +333,25 @@ UI.WaveForm = function(){
 
 		EventBus.trigger(EVENT.samplePropertyChange,{
 			sampleLength: sampleLength,
-            loopLength: instrument ? instrument.sample.loop.length : 0
+            loopLength: instrument ? instrument.sample.loop.length : 0,
+			internal:true
 		});
 
 		if (ignoreInstrumentChange) return;
 
 		isPlaying = false;
 		me.zoom(1);
-		rangeStart=0;
-		rangeEnd=0;
+		rangeStart=-1;
+		rangeEnd=-1;
 		rangeLength=0;
 		me.refresh();
 	};
 
-	me.play = function(period){
+	me.play = function(period,offset){
 		if (zoom>1) return;
-
-		playingOffset = initPlayingOffset;
+		offset = offset || 0;
+		
+		playingOffset = offset;
 		isPlaying = true;
 		startPlayTime = new Date().getTime();
 		sampleRate = Audio.getSampleRateForPeriod(period);
@@ -335,14 +360,10 @@ UI.WaveForm = function(){
 
 	me.playSection = function(section){
 		if (section === "range"){
-			initPlayingOffset = rangeStart;
-			Input.handleNoteOn(Input.getPrevIndex(),undefined,initPlayingOffset);
-			initPlayingOffset = 0;
+			Input.handleNoteOn(Input.getPrevIndex(),undefined,rangeStart);
 		}
 		if (section === "loop"){
-			initPlayingOffset = currentInstrument.sample.loop.start;
-			Input.handleNoteOn(Input.getPrevIndex(),undefined,initPlayingOffset);
-			initPlayingOffset = 0;
+			Input.handleNoteOn(Input.getPrevIndex(),undefined,currentInstrument.sample.loop.start);
 		}
 
 	};
@@ -374,7 +395,6 @@ UI.WaveForm = function(){
 		}
 
 		if (amount === "loop"){
-			console.error(currentInstrument.sample.loop);
 			if (currentInstrument.sample.loop.enabled){
 				zoomStart = currentInstrument.sample.loop.start;
 				zoomLength = currentInstrument.sample.loop.length;
@@ -418,41 +438,45 @@ UI.WaveForm = function(){
 	};
 
 
-	me.select = function(range){
+	me.select = function(range,start,length){
 
-		if (range === "all"){
-			rangeStart = 0;
-			rangeEnd = currentSampleData.length;
-			rangeLength = currentSampleData.length;
-			me.refresh();
-		}
-
-		if (range === "none"){
-			rangeStart = 0;
-			rangeEnd = 0;
-			rangeLength = 0;
-			me.refresh();
-		}
-
-		if (range === "loop"){
-			if (currentInstrument.sample.loop.length>2){
-				rangeStart = currentInstrument.sample.loop.start;
-				rangeLength = currentInstrument.sample.loop.length;
-				rangeEnd = rangeStart+rangeLength;
+		switch (range){
+			case "all":
+				rangeStart = 0;
+				rangeEnd = currentSampleData.length;
+				rangeLength = currentSampleData.length;
 				me.refresh();
-			}
-		}
-
-		if (range === "start"){
-			rangeStart = 0;
-			rangeLength = rangeEnd - rangeStart;
-			me.refresh();
-		}
-
-		if (range === "end"){
-			rangeEnd = currentSampleData.length;
-			rangeLength = rangeEnd - rangeStart;
-			me.refresh();
+				break;
+			case "none":
+				rangeStart = -1;
+				rangeEnd = -1;
+				rangeLength = 0;
+				me.refresh();
+				break;
+			case "loop":
+				if (currentInstrument.sample.loop.length>2){
+					rangeStart = currentInstrument.sample.loop.start;
+					rangeLength = currentInstrument.sample.loop.length;
+					rangeEnd = rangeStart+rangeLength;
+					me.refresh();
+				}
+				break;
+			case "start":
+				rangeStart = 0;
+				rangeLength = rangeEnd - rangeStart;
+				me.refresh();
+				break;
+			case "end":
+				rangeEnd = currentSampleData.length;
+				rangeLength = rangeEnd - rangeStart;
+				me.refresh();
+				break;
+			case "range":
+				rangeStart = start;
+				rangeLength = length;
+				rangeEnd = rangeStart + rangeLength;
+				me.refresh();
+				break;
 		}
 
 		EventBus.trigger(EVENT.samplePropertyChange,{
@@ -461,6 +485,7 @@ UI.WaveForm = function(){
 
 		UI.setSelection(me.processSelection);
 	};
+
 
 	me.render = function(){
 		//   TODO: put wave on separate canvas
@@ -498,7 +523,7 @@ UI.WaveForm = function(){
 
 					for (var i = 0; i<me.width; i++){
 						var index = Math.floor(i*step);
-						var peak = currentSampleData[zoomStart + index] * maxHeight;
+						var peak = currentSampleData[zoomStart + index] * -maxHeight;
 
 						if(i === 0) {
 							waveformDisplay.ctx.moveTo(i, mid + peak);
@@ -556,7 +581,7 @@ UI.WaveForm = function(){
 			var rangeLineX1 = -1;
 			var rangeLineX2 = -1;
 
-			if (rangeEnd){
+			if (rangeEnd>=0){
 				color = "rgb(241, 131, 71)";
 				me.ctx.fillStyle = color;
 				if (activeDragMarker === MARKERTYPE.rangeEnd) me.ctx.fillStyle = "white";
@@ -565,7 +590,7 @@ UI.WaveForm = function(){
 				me.ctx.fillRect(rangeLineX2+1,11,4,10);
 			}
 
-			if (rangeStart){
+			if (rangeStart>=0){
 				if (rangeStart<zoomStart){
 					rangeLineX1=0;
 				}else{
@@ -688,14 +713,58 @@ UI.WaveForm = function(){
 		waveformDisplay.refresh();
 		me.refresh();
 	}
+	
+	function checkLoop(){
+		var ls = currentInstrument.sample.loop.start;
+		var ll = currentInstrument.sample.loop.length;
+		var sl = currentInstrument.sample.length
+		
+		if (ls<0) ls=0;
+		if (ll<0) ll=0;
+		
+		if ((ls+ll)>sl){
+			if (ls>sl){
+				ls=sl;
+			}
+			ll=sl-ls;
+		}
+		
+		if (ls!==currentInstrument.sample.loop.start || ll!==currentInstrument.sample.loop.length){
+			currentInstrument.sample.loop.start=ls;
+			currentInstrument.sample.loop.length=ll;
+			
+			ignoreInstrumentChange = true;
+			EventBus.trigger(EVENT.instrumentChange,Tracker.getCurrentInstrumentIndex());
+			ignoreInstrumentChange = false;
+			waveformDisplay.refresh();
+			me.refresh();
+		}
+	}
+	
+	function restoreLoop(action){
+		if (action.loopStart || action.loopLength){
+			currentInstrument.sample.loop.start = action.loopStart || 0;
+			currentInstrument.sample.loop.length = action.loopLength || 0;
+
+			ignoreInstrumentChange = true;
+			EventBus.trigger(EVENT.instrumentChange,Tracker.getCurrentInstrumentIndex());
+			ignoreInstrumentChange = false;
+		}
+		
+	}
 
 
 	me.adjustVolume = function(amount){
 		var data = splitRange();
 
-		console.error(currentSampleData.length,data.range.length);
+		//console.error(currentSampleData.length,data.range.length);
 		var scale,i,len;
 		var update = false;
+
+		
+		var editAction = StateManager.createSampleUndo(SELECTION.REPLACE,rangeStart,rangeLength);
+		editAction.data = data.range.slice(0);
+		editAction.name = "Adjust Volume";
 
 		if (amount === "max"){
 			var min = 0;
@@ -739,27 +808,56 @@ UI.WaveForm = function(){
 		}
 
 		if (update){
+			editAction.dataTo = data.range.slice(0);
+			StateManager.registerEdit(editAction);
 			joinRange(data);
 		}
 	};
 
 	me.reverse = function(){
 		var data = splitRange();
+
+		var editAction = StateManager.createSampleUndo(SELECTION.REPLACE,rangeStart,rangeLength);
+		editAction.data = data.range.slice(0);
+		editAction.name = "Reverse Sample";
+		
 		data.range = data.range.reverse();
+
+		editAction.dataTo = data.range.slice(0);
+		StateManager.registerEdit(editAction);
+		
 		joinRange(data);
 	};
 
 	me.invert = function(){
 		var data = splitRange();
+
+		var editAction = StateManager.createSampleUndo(SELECTION.REPLACE,rangeStart,rangeLength);
+		editAction.data = data.range.slice(0);
+		editAction.name = "Reverse Sample";
+		
+		
 		for (var i = 0, len = data.range.length-1; i<=len; i++){
 			data.range[i] = -data.range[i];
 		}
+
+		editAction.dataTo = data.range.slice(0);
+		StateManager.registerEdit(editAction);
+		
 		joinRange(data);
 	};
 
 	me.resample = function(direction){
 		var data = splitRange();
 		var newRange = [];
+
+		var editAction = StateManager.createSampleUndo(SELECTION.REPLACE,rangeStart,rangeLength);
+		editAction.data = data.range.slice(0);
+		editAction.name = "Resample Sample";
+		editAction.loopStart = currentInstrument.sample.loop.start;
+		editAction.loopLength = currentInstrument.sample.loop.length;
+
+
 		if (direction === "up"){
 			for (var i = 0, len = data.range.length; i<len; i++){
 				// should we interpolate?
@@ -786,6 +884,11 @@ UI.WaveForm = function(){
 			currentInstrument.sample.loop.length = currentInstrument.sample.loop.length - currentInstrument.sample.loop.length%2;
 		}
 		data.range = newRange;
+
+		editAction.dataTo = newRange.slice(0);
+		StateManager.registerEdit(editAction);
+
+
 		joinRange(data);
 	};
 
@@ -793,7 +896,7 @@ UI.WaveForm = function(){
 		if (!me.isVisible()) return;
 		switch (state) {
 			case SELECTION.RESET:
-				// keep selection persistant
+				// keep selection persistent
 				return false;
 			case SELECTION.CLEAR:
 				me.adjustVolume(0);
@@ -805,27 +908,73 @@ UI.WaveForm = function(){
 					rangeCache = data.range.slice(0);
 
 					if (state === SELECTION.CUT){
+
+						var editAction = StateManager.createSampleUndo(SELECTION.CUT,rangeStart,rangeLength);
+						editAction.data = data.range.slice(0);
+						editAction.name = "cut sample";
+						editAction.loopStart = currentInstrument.sample.loop.start
+						editAction.loopLength = currentInstrument.sample.loop.length
+						StateManager.registerEdit(editAction);
+						
+
 						data.range = [];
 						joinRange(data);
+						checkLoop();
 						rangeLength = 0;
 						rangeEnd = rangeStart + rangeLength;
 						EventBus.trigger(EVENT.samplePropertyChange,{
 							rangeLength: rangeLength
 						});
-						me.refresh()
+						me.refresh();
 					}
 				}
 				break;
+			case SELECTION.DELETE:
+				if (rangeLength>0){
+					var data = splitRange();
+					data.range = [];
+					joinRange(data);
+					rangeLength = 0;
+					rangeEnd = rangeStart + rangeLength;
+					EventBus.trigger(EVENT.samplePropertyChange,{
+						rangeLength: rangeLength
+					});
+					me.refresh();
+				}
+				break;
 			case SELECTION.PASTE:
+				
+				//console.error(rangeCache.length,rangeStart)
 				data = splitRange(true);
-				console.error(data);
-				console.log(rangeStart);
-				if (rangeStart){
-					data.range = data.range.concat(rangeCache);
+				
+				if (rangeStart<0){
+					// no selection - paste at end of sample
+					rangeStart = currentSampleData.length;
+				}
+
+				var editAction = StateManager.createSampleUndo(SELECTION.PASTE,rangeStart,rangeCache.length);
+				editAction.name = "paste sample";
+				editAction.data = data.range.slice(0);
+				editAction.dataTo = rangeCache.slice(0);
+				editAction.loopStart = currentInstrument.sample.loop.start;
+				editAction.loopLength = currentInstrument.sample.loop.length;
+				
+				StateManager.registerEdit(editAction);
+				
+				if (rangeStart>=0){
+					data.range = rangeCache;
 				}else{
 					data.tail = data.tail.concat(rangeCache);
+					
 				}
 				joinRange(data);
+				checkLoop();
+				
+				// paste clears the selection by default
+				setTimeout(function(){
+					me.select("range",rangeStart,rangeCache.length);
+				},10);
+
 				break;
 			case SELECTION.POSITION:
 
@@ -837,6 +986,72 @@ UI.WaveForm = function(){
 	EventBus.on(EVENT.commandSelectAll,function(){
 		if (me.isVisible()){
 			me.select("all");
+		}
+	});
+
+	EventBus.on(EVENT.commandProcessSample,function(action){
+		if (me.isVisible()){
+			if (action.undo){
+				switch (action.action){
+					case SELECTION.CUT:
+						me.select("range",action.from,0);
+						var data = splitRange(true);
+						data.range = action.data;
+						joinRange(data);
+						restoreLoop(action);
+						me.select("range",action.from,action.data.length);
+						break;
+					case SELECTION.PASTE:
+						me.select("range",action.from,action.to);
+						var data = splitRange(true);
+						data.range = action.data;
+						joinRange(data);
+						restoreLoop(action);
+						me.select("range",action.from,action.data.length);
+						
+						
+						break;
+					case SELECTION.REPLACE:
+						me.select("range",action.from,action.to);
+						var data = splitRange();
+						data.range = action.data;
+						joinRange(data);
+						if (action.to){
+							me.select("range",action.from,action.data.length);
+						}
+						break;
+				}
+			}
+
+			if (action.redo){
+				switch (action.action){
+					case SELECTION.CUT:
+						me.select("range",action.from,action.data.length);
+						var data = splitRange();
+						data.range = [];
+						joinRange(data);
+						me.select("range",action.from,0);
+						break;
+					case SELECTION.PASTE:
+						me.select("range",action.from,action.data.length || 0);
+						var data = splitRange(true);
+						data.range = action.dataTo;
+						joinRange(data);
+						checkLoop();
+						me.select("range",action.from,action.dataTo.length);
+						break;
+					case SELECTION.REPLACE:
+						me.select("range",action.from,action.to);
+						var data = splitRange();
+						data.range = action.dataTo;
+						joinRange(data);
+						if (action.to){
+							me.select("range",action.from,action.data.length);
+						}
+						break;
+				}
+			}
+
 		}
 	});
 

@@ -1,14 +1,14 @@
 UI.inputbox = function(initialProperties){
 	var me = UI.element();
-	var properties = ["left","top","width","height","name","type","onChange","backgroundImage"];
+	var properties = ["left","top","width","height","name","type","onChange","onSubmit","backgroundImage","trackUndo","undoLabel","undoInstrument"];
 	var value = "";
+	var prevValue = "";
 	var isActive;
 	var isCursorVisible;
 	var cursorPos;
 	var backgroundImage = "panel_dark";
 
 	me.setProperties = function(p){
-
 		properties.forEach(function(key){
 			if (typeof p[key] != "undefined") me[key] = p[key];
 		});
@@ -32,9 +32,7 @@ UI.inputbox = function(initialProperties){
 	});
 	background.ignoreEvents = true;
 	me.addChild(background);
-
-
-
+	
 	me.render = function(internal){
 		internal = !!internal;
 		if (!me.isVisible()) return;
@@ -68,13 +66,33 @@ UI.inputbox = function(initialProperties){
 	};
 
 	me.setValue = function(newValue,internal){
+		if (newValue!==value) {
+			prevValue=value;
+		}
 		value = newValue;
 		me.refresh();
-		if (!internal && me.onChange) me.onChange(value);
+		
+		if (!internal && me.onChange) {
+			if (me.trackUndo){
+				var editAction = StateManager.createValueUndo(me);
+				editAction.name= me.undoLabel || "Change " + me.name;
+				if (me.undoInstrument) {
+					editAction.instrument = Tracker.getCurrentInstrumentIndex();
+					editAction.id += editAction.instrument;
+				}
+				StateManager.registerEdit(editAction);
+			}
+			me.onChange(value);
+		}
 	};
+	
 	me.getValue = function(){
 		return value;
 	};
+
+	me.getPrevValue = function(){
+		return prevValue;
+	}
 
 	me.getItemAtPosition = function(x,y){
 		y = y-startY;
@@ -93,42 +111,41 @@ UI.inputbox = function(initialProperties){
 	};
 
 	me.activate = function(){
-		cursorPos = -1;
-		console.log("activate " + me.name);
-		if (!isActive && value){
-			cursorPos = value.length-1;
-		}
+		if (isActive) return;
+		cursorPos = value ? value.length-1 : -1;
 		isActive = true;
 		Input.setFocusElement(me);
 		pingCursor();
 	};
 
-	me.deActivate = function(){
+	me.deActivate = function(andSubmit){
 		if (isActive){
 			isCursorVisible = false;
 			isActive = false;
 			me.refresh();
-			Input.clearFocusElement()
+			Input.clearFocusElement();
+			if (andSubmit && me.onSubmit){
+				me.onSubmit(value);
+			}
 		}
-
 	};
 
 	me.onKeyDown = function(keyCode,event){
 		var handled = false;
-
 		switch(keyCode){
 			case 8:// backspace
 				if (value) {
 					if (cursorPos>=0){
-						value = value.substr(0,cursorPos) + value.substr(cursorPos+1);
+						me.setValue(value.substr(0,cursorPos) + value.substr(cursorPos+1));
 						cursorPos--;
-						if (me.onChange) me.onChange(value);
 					}
 				}
 				handled = true;
 				break;
+			case 9:// tab
 			case 13:// enter
-				me.deActivate();
+			case 27:// esc
+				me.deActivate(keyCode===13);
 				handled = true;
 				break;
 			case 37:// left
@@ -145,17 +162,27 @@ UI.inputbox = function(initialProperties){
 				handled = true;
 				break;
 			case 46: // delete
+				if (value) {
+					if (cursorPos<value.length-1){
+						me.setValue(value.substr(0,cursorPos+1) + value.substr(cursorPos+2));
+					}
+				}
 				handled = true;
+				break;
+			case 89: ///y - redo
+			case 90: //z - undo
+				if (Input.isMetaKeyDown()){
+					me.deActivate();
+					return;
+				}
 				break;
 		}
 
 		if (!handled && keyCode>31){
 			var key = event.key;
-			if (key.length == 1 && key.match(/[a-z0-9\._:\-\ #]/i)){
-				value = value.substr(0,cursorPos+1) + key + value.substr(cursorPos+1);
-				if (me.onChange) me.onChange(value);
+			if (key.length === 1 && key.match(/[a-z0-9\._:\-\ #]/i)){
+				me.setValue(value.substr(0,cursorPos+1) + key + value.substr(cursorPos+1));
 				cursorPos++;
-				me.refresh();
 			}
 			handled = true;
 		}
@@ -167,7 +194,7 @@ UI.inputbox = function(initialProperties){
 		if (!isActive) return;
 		isCursorVisible = !isCursorVisible;
 		me.refresh();
-		setTimeout(pingCursor,200);
+		setTimeout(pingCursor,300);
 	};
 
 	return me;

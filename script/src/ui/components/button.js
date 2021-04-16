@@ -18,7 +18,7 @@ UI.button = function(x,y,w,h,text){
     var paddingLeft = 10;
     var hasHover = true;
 
-    var properties = ["left","top","width","height","name","type","image","backgroundImage","background","active","hoverBackground","hoverImage","activeBackground","activeImage","font","label","textAlign","paddingTop","paddingTopActive","paddingLeft"];
+    var properties = ["left","top","width","height","name","type","image","backgroundImage","background","active","hoverBackground","hoverImage","activeBackground","activeImage","font","label","textAlign","paddingTop","paddingTopActive","paddingLeft","checkbox","radio"];
 
     me.setProperties = function(p){
 
@@ -70,6 +70,16 @@ UI.button = function(x,y,w,h,text){
         if (hoverBackground) hoverBackground.setSize(me.width,me.height);
         me.setSize(me.width,me.height);
         me.setPosition(me.left,me.top);
+
+        if (p.labels){
+            me.onResize = function(){
+                var currentLabel = label;
+                p.labels.forEach(function(item){
+                    if (me.width>=item.width) label=item.label;
+                });
+                if (currentLabel !== label) me.refresh();
+            };
+        }
 
     };
 

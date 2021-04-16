@@ -57,9 +57,8 @@ var Editor = (function(){
 	};
 
 
-	me.putNote = function(instrument,period,noteIndex){
+	me.putNote = function(instrument,period,noteIndex,volume){
 		var note = Tracker.getSong().patterns[currentPattern][currentPatternPos][currentTrack] || new Note();
-
 		var editAction = StateManager.createNoteUndo(currentPattern,currentTrack,currentPatternPos,note);
 		
 		if (note){
@@ -68,6 +67,15 @@ var Editor = (function(){
 				note.setIndex(noteIndex);
 			}else{
 				note.setPeriod(period);
+			}
+			if (typeof volume === "number"){
+				if (Tracker.inFTMode()){
+					note.volumeEffect = volume + 16;
+				}else{
+					note.effect = 12;
+					note.param = volume;
+				}
+				
 			}
 		}
 		
@@ -129,6 +137,7 @@ var Editor = (function(){
 	me.clearTrack = function(){
 		var length = Tracker.getCurrentPatternData().length;
 		var editAction = StateManager.createTrackUndo(currentPattern);
+		editAction.name = "Clear Track";
 		for (var i = 0; i<length;i++){
 			var note = Tracker.getSong().patterns[currentPattern][i][currentTrack];
 			if (note) {
@@ -142,6 +151,7 @@ var Editor = (function(){
 	me.clearPattern = function(){
 		var length = Tracker.getCurrentPatternData().length;
 		var editAction = StateManager.createPatternUndo(currentPattern);
+		editAction.name = "Clear Pattern";
 		for (var i = 0; i<length;i++){
 			for (var j = 0; j<Tracker.getTrackCount(); j++){
 				var note = Tracker.getSong().patterns[currentPattern][i][j];
@@ -183,10 +193,9 @@ var Editor = (function(){
 		if (!hasTracknumber) trackNumber = currentTrack;
 		var length = Tracker.getCurrentPatternData().length;
 		var data = [];
-
-		console.error(trackNumber);
+		
 		for (var i = 0; i<length;i++){
-			var note = Tracker.getSong().patterns[currentPattern][i][trackNumber];
+			var note = Tracker.getSong().patterns[currentPattern][i][trackNumber] || new Note();
 			data.push(note.duplicate());
 		}
 		if (hasTracknumber){
@@ -212,20 +221,29 @@ var Editor = (function(){
 		return pasteBuffer;
 	};
 
-	me.pasteTrack = function(trackNumber,trackData){
+	me.pasteTrack = function(trackNumber,trackData,parentEditAction){
 		var hasTracknumber = typeof trackNumber != "undefined";
 		var data = trackData;
 		if (!hasTracknumber) {
 			trackNumber = currentTrack;
 			data = pasteBuffer.track;
 		}
-		console.log("paste",trackNumber,data[0]);
-
 		if (data){
-			var editAction = StateManager.createTrackUndo(currentPattern);
+			var editAction;
+			if (parentEditAction){
+				editAction = parentEditAction;
+			}else{
+				var editAction = StateManager.createTrackUndo(currentPattern);
+				editAction.name = "Paste Track";
+			}
 			var length = Tracker.getCurrentPatternData().length;
+			var patternData = Tracker.getSong().patterns[currentPattern];
 			for (var i = 0; i<length;i++){
-				var note = Tracker.getSong().patterns[currentPattern][i][trackNumber];
+				var note = patternData[i][trackNumber];
+				if (!note){
+					note = new Note();
+					patternData[i][trackNumber] = note;
+				}
 				var source = data[i];
 				var noteInfo = StateManager.addNote(editAction,trackNumber,i,note);
 				noteInfo.to = source; // should we duplicate source?
@@ -233,7 +251,9 @@ var Editor = (function(){
 			}
 			
 			if (!hasTracknumber) EventBus.trigger(EVENT.patternChange,currentPattern);
-			StateManager.registerEdit(editAction);
+			if (!parentEditAction){
+				StateManager.registerEdit(editAction);
+			}
 			return true;
 		}else{
 			return false;
@@ -242,17 +262,39 @@ var Editor = (function(){
 	};
 
 	me.pastePattern = function(){
-
 		var data = pasteBuffer.pattern;
 		if (data){
+			var editAction = StateManager.createPatternUndo(currentPattern);
+			editAction.name = "Paste Pattern";
 			for (var j = 0; j<Tracker.getTrackCount(); j++) {
-				me.pasteTrack(j,data[j]);
+				me.pasteTrack(j,data[j],editAction);
 			}
+			StateManager.registerEdit(editAction);
 			EventBus.trigger(EVENT.patternChange,currentPattern);
 			return true;
 		}else{
 			return false;
 		}
+
+
+
+
+		var length = Tracker.getCurrentPatternData().length;
+
+		editAction.name = "Clear Pattern";
+		for (var i = 0; i<length;i++){
+			for (var j = 0; j<Tracker.getTrackCount(); j++){
+				var note = Tracker.getSong().patterns[currentPattern][i][j];
+				if (note) {
+					StateManager.addNote(editAction,j,i,note);
+					note.clear();
+				}
+			}
+		}
+		StateManager.registerEdit(editAction);
+		EventBus.trigger(EVENT.patternChange,currentPattern);
+
+
 
 	};
 
@@ -303,6 +345,54 @@ var Editor = (function(){
 		if (from) from.clear();
 
 		EventBus.trigger(EVENT.patternChange,currentPattern);
+	};
+
+
+	me.addToPatternTable = function(index,patternIndex){
+		var song = Tracker.getSong();
+		if (typeof index == "undefined") index = song.length;
+		patternIndex = patternIndex||0;
+
+		if (index === song.length){
+			song.patternTable[index] = patternIndex;
+			song.length++;
+		}else{
+			for (var i = song.length; i>index; i--){
+				song.patternTable[i] = song.patternTable[i-1];
+			}
+			song.patternTable[index] = patternIndex;
+			song.length++;
+		}
+
+		EventBus.trigger(EVENT.songPropertyChange,song);
+		EventBus.trigger(EVENT.patternTableChange);
+
+
+	};
+
+	me.removeFromPatternTable = function(index){
+		var song = Tracker.getSong();
+		if (song.length<2) return;
+		if (typeof index == "undefined") index = song.length-1;
+
+		if (index === song.length-1){
+			song.patternTable[index] = 0;
+			song.length--;
+		}else{
+			for (var i=index; i<song.length; i++){
+				song.patternTable[i] = song.patternTable[i+1];
+			}
+			song.length--;
+		}
+
+		var currentSongPosition = Tracker.getCurrentSongPosition(); 
+		if (currentSongPosition === song.length){
+			Tracker.setCurrentSongPosition(currentSongPosition-1);
+		}
+
+		EventBus.trigger(EVENT.songPropertyChange,song);
+		EventBus.trigger(EVENT.patternTableChange);
+
 	};
 
 	me.renderTrackToBuffer = function(fileName,target){
@@ -502,6 +592,27 @@ var Editor = (function(){
         if (writer) writer.write(next);
 
     };
+    
+    me.loadInitialFile = function(){
+		// load demo mod at startup
+		//Tracker.load('demomods/spacedeb.mod');
+
+		var initialFile = getUrlParameter("file");
+		if (initialFile){
+			initialFile = decodeURIComponent(initialFile);
+
+			if (initialFile.substr(0,7).toLowerCase() === "http://" && document.location.protocol === "https:"){
+				// proxy plain HTTP requests as this won't work over HTTPS
+				initialFile = BassoonProvider.proxyUrl(initialFile);
+			}else if (initialFile.substr(0,6).toLowerCase() === "proxy/"){
+				initialFile = BassoonProvider.proxyUrl(initialFile.substr(6));
+			}
+		}else{
+			if (SETTINGS.loadInitialFile) initialFile = Host.getBaseUrl() + 'demomods/Tinytune.mod';
+		}
+		if (initialFile) Tracker.load(initialFile,true,undefined,true);
+
+	}
 
 
 	EventBus.on(EVENT.trackerModeChanged,function(mode){

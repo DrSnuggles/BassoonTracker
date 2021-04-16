@@ -65,7 +65,14 @@ var EVENT = {
 	commandUndo: 50,
 	commandRedo: 51,
 	commandSelectAll: 52,
-	songEnd: 53
+	songEnd: 53,
+	patternEnd: 54,
+	songSpeedChangeIgnored:55,
+	songBPMChangeIgnored:56,
+	commandProcessSample: 57,
+	pluginRenderHook: 58,
+	menuLayoutChanged: 59,
+	midiIn: 60
 };
 
 var COMMAND = {
@@ -93,7 +100,10 @@ var COMMAND = {
 	copy: 22,
 	paste: 23,
 	pattern2Sample: 24,
-	toggleAppSideBar: 25
+	toggleAppSideBar: 25,
+	undo: 26,
+	redo: 27,
+	nibbles: 28
 };
 
 var PLAYTYPE = {
@@ -145,14 +155,20 @@ var SELECTION = {
 	CUT: 3,
 	COPY : 4,
 	PASTE : 5,
-	POSITION: 6
+	POSITION: 6,
+	DELETE: 7,
+	REPLACE: 8
 
 };
 
 var EDITACTION = {
 	PATTERN: 1,
 	TRACK: 2,
-	NOTE: 3
+	NOTE: 3,
+	RANGE: 4,
+	VALUE: 5,
+	DATA: 6,
+	SAMPLE: 7
 };
 
 
@@ -580,5 +596,6 @@ var SETTINGS = {
 	keyboardTable: "qwerty",
 	vubars: true,
 	stereoSeparation: STEREOSEPARATION.BALANCED,
-	emulateProtracker1OffsetBug: true
+	emulateProtracker1OffsetBug: true,
+	loadInitialFile:true
 };

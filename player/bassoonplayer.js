@@ -16,6 +16,7 @@ var Host = function(){
 	me.useDropbox = true;
 	me.showInternalMenu = true;
 	me.useWebWorkers = true;
+	me.useInitialLoad = true;
 	
 	me.init = function(){
 	    if (typeof HostBridge === "object"){
@@ -59,6 +60,10 @@ var Host = function(){
 		if (typeof buildNumber !== "undefined") return buildNumber;
 		if (hostBridge && hostBridge.getBuildNumber) return hostBridge.getBuildNumber();
 		return new Date().getTime();
+	};
+
+	me.signalReady = function(){
+		if (hostBridge && hostBridge.signalReady) hostBridge.signalReady();
 	};
 	
 	me.putFile = function(filename,file){
@@ -134,7 +139,14 @@ var EVENT = {
 	commandUndo: 50,
 	commandRedo: 51,
 	commandSelectAll: 52,
-	songEnd: 53
+	songEnd: 53,
+	patternEnd: 54,
+	songSpeedChangeIgnored:55,
+	songBPMChangeIgnored:56,
+	commandProcessSample: 57,
+	pluginRenderHook: 58,
+	menuLayoutChanged: 59,
+	midiIn: 60
 };
 
 var COMMAND = {
@@ -162,7 +174,10 @@ var COMMAND = {
 	copy: 22,
 	paste: 23,
 	pattern2Sample: 24,
-	toggleAppSideBar: 25
+	toggleAppSideBar: 25,
+	undo: 26,
+	redo: 27,
+	nibbles: 28
 };
 
 var PLAYTYPE = {
@@ -214,14 +229,20 @@ var SELECTION = {
 	CUT: 3,
 	COPY : 4,
 	PASTE : 5,
-	POSITION: 6
+	POSITION: 6,
+	DELETE: 7,
+	REPLACE: 8
 
 };
 
 var EDITACTION = {
 	PATTERN: 1,
 	TRACK: 2,
-	NOTE: 3
+	NOTE: 3,
+	RANGE: 4,
+	VALUE: 5,
+	DATA: 6,
+	SAMPLE: 7
 };
 
 
@@ -649,7 +670,8 @@ var SETTINGS = {
 	keyboardTable: "qwerty",
 	vubars: true,
 	stereoSeparation: STEREOSEPARATION.BALANCED,
-	emulateProtracker1OffsetBug: true
+	emulateProtracker1OffsetBug: true,
+	loadInitialFile:true
 };;
 var EventBus = (function() {
 
@@ -657,21 +679,27 @@ var EventBus = (function() {
 
     var me = {};
 
-    me.on = function (event, listener) {
+    me.on = function(event, listener) {
         var eventHandlers = allEventHandlers[event];
         if (!eventHandlers) {
             eventHandlers = [];
             allEventHandlers[event] = eventHandlers;
         }
         eventHandlers.push(listener);
+        return eventHandlers.length;
     };
+    
+    me.off = function(event,index){
+        var eventHandlers = allEventHandlers[event];
+        if (eventHandlers) eventHandlers[index-1]=undefined;
+    }
 
     me.trigger = function(event, context) {
         var eventHandlers = allEventHandlers[event];
         if (eventHandlers) {
             var i, len = eventHandlers.length;
             for (i = 0; i < len; i++) {
-                eventHandlers[i](context,event);
+                if (eventHandlers[i]) eventHandlers[i](context,event);
             }
         }
     };
@@ -890,6 +918,7 @@ var Audio = (function(){
     var mediaRecorder;
     var recordingChunks = [];
     var offlineContext;
+    var onlineContext;
     var currentStereoSeparation = STEREOSEPARATION.BALANCED;
     var lastMasterVolume = 0;
     var usePanning;
@@ -911,11 +940,32 @@ var Audio = (function(){
 
     var isRendering = false;
 
-    function createAudioConnections(audioContext){
+    function createAudioConnections(audioContext,destination){
 
         cutOffVolume = audioContext.createGain();
         cutOffVolume.gain.setValueAtTime(1,0);
-        cutOffVolume.connect(audioContext.destination);
+
+        // Haas effect stereo expander
+        var useStereoExpander = false;
+        if (useStereoExpander){
+            var splitter = audioContext.createChannelSplitter(2);
+            var merger = audioContext.createChannelMerger(2);
+            var haasDelay = audioContext.createDelay(1);
+            cutOffVolume.connect(splitter);
+            splitter.connect(haasDelay, 0);
+            haasDelay.connect(merger, 0, 0);
+            splitter.connect(merger, 1, 1);
+            merger.connect(destination || audioContext.destination);
+            window.haasDelay = haasDelay;
+        }else{
+            cutOffVolume.connect(destination || audioContext.destination);
+        }
+
+
+
+
+
+
 
         masterVolume = audioContext.createGain();
         masterVolume.connect(cutOffVolume);
@@ -936,9 +986,11 @@ var Audio = (function(){
         context = new AudioContext();
     }
 
-    me.init = function(audioContext){
+    me.init = function(audioContext,destination){
 
         audioContext = audioContext || context;
+        context = audioContext;
+        me.context = context;
         if (!audioContext) return;
 
         usePanning = !!Audio.context.createStereoPanner;
@@ -947,7 +999,7 @@ var Audio = (function(){
         }
         hasUI = typeof Editor !== "undefined";
 
-        createAudioConnections(audioContext);
+        createAudioConnections(audioContext,destination);
 
         var numberOfTracks = Tracker.getTrackCount();
         filterChains = [];
@@ -1164,7 +1216,6 @@ var Audio = (function(){
             var playTime = time + sourceDelayTime;
 
             source.start(playTime,offset);
-
             var result = {
                 source: source,
                 volume: volumeGain,
@@ -1201,7 +1252,11 @@ var Audio = (function(){
         if (context){
             var source = context.createBufferSource();
             source.connect(masterVolume);
-            source.start();
+            try{
+            	source.start();
+			}catch (e){
+            	console.error(e);
+			}
         }
     };
 
@@ -1267,6 +1322,7 @@ var Audio = (function(){
 
         console.log("startRendering " + length);
         offlineContext = new OfflineAudioContext(2,44100*length,44100);
+        onlineContext = context;
         me.context = offlineContext;
         me.init(offlineContext);
     };
@@ -1282,10 +1338,11 @@ var Audio = (function(){
             // Note: The promise should reject when startRendering is called a second time on an OfflineAudioContext
         });
 
+
         // switch back to online Audio context;
-        me.context = context;
-        createAudioConnections(context);
-        me.init(context);
+        me.context = onlineContext;
+        createAudioConnections(onlineContext);
+        me.init(onlineContext);
     };
     //-->
 
@@ -1321,7 +1378,7 @@ var Audio = (function(){
 
         for (i = 0; i<numberOfTracks;i++){
             var filter = filterChains[i];
-            if (filter) filter.panningValue(i%2==0 ? -panAmount : panAmount);
+            if (filter) filter.panningValue((i%4===0)||(i%4===3) ? -panAmount : panAmount);
         }
     };
 
@@ -2175,8 +2232,6 @@ FilterChain = (function(filters) {
 	};
 
 	me.setState = function(name,value){
-		console.error(name,value);
-
 		disConnectFilter();
 
         if (name==="high") useHigh=!!value;
@@ -2220,6 +2275,7 @@ var Tracker = (function(){
 
 	// TODO: strip UI stuff
 	var me = {};
+	me.isMaster = true;
 
 	var clock;
 
@@ -2261,15 +2317,16 @@ var Tracker = (function(){
 	var trackerStates = [];
 	var patternLoopStart = [];
 	var patternLoopCount = [];
-
-	for (var i=0;i<trackCount;i++){
-		trackNotes.push({});
-		trackEffectCache.push({});
-	}
-
-	console.log("ticktime: " + tickTime);
+	
+	//console.log("ticktime: " + tickTime);
 
 	me.init = function(config){
+
+		for (var i=0;i<trackCount;i++){
+			trackNotes.push({});
+			trackEffectCache.push({});
+		}
+		
 		for (var i = -8; i<8;i++){
 			periodFinetuneTable[i] = {};
 		}
@@ -2305,11 +2362,46 @@ var Tracker = (function(){
 		}
 
 		if (config) {
-			Audio.init();
-			if (config.plugin) UI.initPlugin(config);
+			Host.init();
+			Audio.init(config.audioContext,config.audioDestination);
+			if (config.plugin){
+				me.isPlugin = true;
+				UI.initPlugin(config);
+				if (typeof config.isMaster === "boolean") me.isMaster = config.isMaster;
+				if (config.handler){
+					EventBus.on(EVENT.songBPMChange,function(bpm){
+						config.handler(EVENT.songBPMChange,bpm);
+					});
+					EventBus.on(EVENT.songBPMChangeIgnored,function(bpm){
+						config.handler(EVENT.songBPMChangeIgnored,bpm);
+					});
+
+
+
+					EventBus.on(EVENT.songSpeedChange,function(speed){
+						config.handler(EVENT.songSpeedChange,speed);
+					});
+					EventBus.on(EVENT.songSpeedChangeIgnored,function(speed){
+						config.handler(EVENT.songSpeedChangeIgnored,speed);
+					});
+
+
+					EventBus.on(EVENT.patternEnd,function(time){
+						config.handler(EVENT.patternEnd,time);
+					});
+				}
+			}
 		}
 
 	};
+	
+	me.setMaster = function(value){
+		me.isMaster = value;
+	}
+
+	me.isMaster = function(){
+		return !!me.isMaster;
+	}
 
 	me.setCurrentInstrumentIndex = function(index){
 		if (song.instruments[index]){
@@ -2410,43 +2502,6 @@ var Tracker = (function(){
 		}
 	};
 
-	me.addToPatternTable = function(index,patternIndex){
-		if (typeof index == "undefined") index = song.length;
-		patternIndex = patternIndex||0;
-
-		if (index == song.length){
-			song.patternTable[index] = patternIndex;
-			song.length++;
-		}else{
-			// TODO: insert pattern;
-		}
-
-		EventBus.trigger(EVENT.songPropertyChange,song);
-		EventBus.trigger(EVENT.patternTableChange);
-
-
-	};
-
-	me.removeFromPatternTable = function(index){
-		if (song.length<2) return;
-		if (typeof index == "undefined") index = song.length-1;
-
-		if (index == song.length-1){
-			song.patternTable[index] = 0;
-			song.length--;
-		}else{
-			// TODO: remove pattern and shift other patterns up;
-		}
-
-		if (currentSongPosition == song.length){
-			me.setCurrentSongPosition(currentSongPosition-1);
-		}
-
-		EventBus.trigger(EVENT.songPropertyChange,song);
-		EventBus.trigger(EVENT.patternTableChange);
-
-	};
-
 	me.setPlayType = function(playType){
 		currentPlayType = playType;
 		EventBus.trigger(EVENT.playTypeChange,currentPlayType);
@@ -2480,7 +2535,7 @@ var Tracker = (function(){
 	me.stop = function(){
 		if (clock) clock.stop();
 		Audio.disable();
-		Audio.setMasterVolume(1);
+		if (!me.isPlugin) Audio.setMasterVolume(1);
 		if (UI) {
 			UI.setStatus("Ready");
 			Input.clearInputNotes();
@@ -2570,7 +2625,7 @@ var Tracker = (function(){
 
 			while (time<maxTime){
 
-				// ignore spped==0 when autoplay is active (Playlists)
+				// ignore speed==0 when autoplay is active (Playlists)
                 if(stepResult.pause && !Tracker.autoPlay){
                     // speed is set to 0
 					if (!stepResult.pasuseHandled){
@@ -2587,15 +2642,16 @@ var Tracker = (function(){
 					}
 					return;
                 }
-
+                
                 me.setStateAtTime(time,{patternPos: p, songPos: playSongPosition});
+                if (!UI) me.setCurrentSongPosition(playSongPosition);
 
 				if (stepResult.patternDelay){
 					// the E14 effect is used: delay Pattern but keep processing effects
 					stepResult.patternDelay--;
 
 					for (i = 0; i<trackCount; i++){
-						applyEffects(i,time)
+						applyEffects(i,time);
 					}
 
 					time += ticksPerStep * tickTime;
@@ -2638,6 +2694,7 @@ var Tracker = (function(){
 								if (p>patternLength) p=0;
 							}
 						}
+						EventBus.trigger(EVENT.patternEnd,time - ticksPerStep * tickTime);
 					}
 				}
 
@@ -2693,11 +2750,13 @@ var Tracker = (function(){
 		// example: see the ED2 command pattern 0, track 3, step 32 in AceMan - Dirty Tricks.mod
 		// not sure this is 100% correct, but in any case it's more correct then setting it at the track it self.
 		// Thinking ... ... yes ... should be fine as no speed related effects are processed on tick 0?
+		//
+		
 
 		for (var i = 0; i<tracks; i++){
 			note = patternStep[i];
 			if (note && note.effect && note.effect === 15){
-				if (note.param <= 32){
+				if (note.param < 32){
 					//if (note.param == 0) note.param = 1;
 					Tracker.setAmigaSpeed(note.param);
 					if (note.param === 0) result.pause = true;
@@ -3490,19 +3549,23 @@ var Tracker = (function(){
 				// Note: shouldn't this be "set speed at time" instead of setting it directly?
 				// TODO: -> investigate
 				// TODO: Yes ... this is actually quite wrong FIXME !!!!
+				
+				// Note 2: this hase moved to the beginning of the "row" sequence:
+				// we scan all tracks for tempo changes and set them before processing any other command.
+				// this is consistant with PT and FT
 
-				if (note.param <= 32){
-					//if (note.param == 0) note.param = 1;
-					Tracker.setAmigaSpeed(note.param,time);
-				}else{
-					Tracker.setBPM(note.param)
-				}
+				//if (note.param < 32){
+				//	//if (note.param == 0) note.param = 1;
+				//	Tracker.setAmigaSpeed(note.param,time);
+				//}else{
+				//	Tracker.setBPM(note.param)
+				//}
 				break;
 
             case 16:
                 //Fasttracker only - global volume
 				value = Math.min(value,64);
-				Audio.setMasterVolume(value/64,time);
+				if (!me.isPlugin) Audio.setMasterVolume(value/64,time);
                 break;
 			case 17:
 				//Fasttracker only - global volume slide
@@ -3533,14 +3596,25 @@ var Tracker = (function(){
 				//Fasttracker only - Key off
 				if (me.inFTMode()){
 					offInstrument = instrument || me.getInstrument(trackNotes[track].currentInstrument);
-					if (offInstrument){
-						volume = offInstrument.noteOff(time,trackNotes[track]);
+					if (note.param && note.param>=ticksPerStep){
+						// ignore: delay is too large
 					}else{
-						console.log("no instrument on track " + track);
-						volume = 0;
+						doPlayNote = false;
+						if (offInstrument){
+							if (note.param){
+								trackEffects.noteOff = {
+									value: note.param
+								}
+								doPlayNote = true;
+							}else{
+								volume = offInstrument.noteOff(time,trackNotes[track]);
+								defaultVolume = volume;
+							}
+						}else{
+							console.log("no instrument on track " + track);
+							defaultVolume = 0;
+						}
 					}
-					defaultVolume = volume;
-					doPlayNote = false;
 				}
 				break;
             case 21:
@@ -3863,6 +3937,13 @@ var Tracker = (function(){
 			trackNote.currentVolume = 0;
 		}
 
+		if (effects.noteOff){
+			var instrument = me.getInstrument(trackNote.instrumentIndex);
+			if (instrument){
+				trackNote.currentVolume = instrument.noteOff(time + (effects.noteOff.value*tickTime),trackNote);
+			}
+		}
+
 		if (effects.reTrigger){
 			var instrumentIndex = trackNote.instrumentIndex;
 			var notePeriod = trackNote.startPeriod;
@@ -3884,27 +3965,40 @@ var Tracker = (function(){
 
 
 
-	me.setBPM = function(newBPM){
-		console.log("set BPM: " + bpm + " to " + newBPM);
-		if (clock) clock.timeStretch(Audio.context.currentTime, [mainTimer], bpm / newBPM);
-		bpm = newBPM;
-		tickTime = 2.5/bpm;
-		EventBus.trigger(EVENT.songBPMChange,bpm);
+	me.setBPM = function(newBPM,sender){
+		var fromMaster = (sender && sender.isMaster); 
+		if (me.isMaster || fromMaster){
+			console.log("set BPM: " + bpm + " to " + newBPM);
+			if (clock) clock.timeStretch(Audio.context.currentTime, [mainTimer], bpm / newBPM);
+			if (!fromMaster) EventBus.trigger(EVENT.songBPMChangeIgnored,bpm);
+			bpm = newBPM;
+			tickTime = 2.5/bpm;
+			EventBus.trigger(EVENT.songBPMChange,bpm);
+		}else{
+			EventBus.trigger(EVENT.songBPMChangeIgnored,newBPM);
+		}
 	};
-
+	
 	me.getBPM = function(){
 		return bpm;
 	};
 
-	me.setAmigaSpeed = function(speed){
+	me.setAmigaSpeed = function(speed,sender){
 		// 1 tick is 0.02 seconds on a PAL Amiga
 		// 4 steps is 1 beat
 		// the speeds sets the amount of ticks in 1 step
 		// default is 6 -> 60/(6*0.02*4) = 125 bpm
 
-		//note: this changes the speed of the song, but not the speed of the main loop
-        ticksPerStep = speed;
+		var fromMaster = (sender && sender.isMaster);
+		if (me.isMaster || fromMaster){
+			//note: this changes the speed of the song, but not the speed of the main loop
+			ticksPerStep = speed;
+			EventBus.trigger(EVENT.songSpeedChange,speed);
+		}else{
+			EventBus.trigger(EVENT.songSpeedChangeIgnored,speed);
+		}
 
+		
 	};
 
 	me.getAmigaSpeed = function(){
@@ -4016,7 +4110,7 @@ var Tracker = (function(){
         trackNote.source.playbackRate.setValueAtTime(rate,time + 0.005);
 	};
 
-	me.load = function(url,skipHistory,next){
+	me.load = function(url,skipHistory,next,initial){
 		url = url || "demomods/StardustMemories.mod";
 
 		if (url.indexOf("://")<0 && url.indexOf("/") !== 0) url = Host.getBaseUrl() + url;
@@ -4027,6 +4121,10 @@ var Tracker = (function(){
 		}
 
 		var process=function(result){
+
+			// initial file is overridden by a load command of the host;
+			if (initial && !Host.useInitialLoad) return;
+
 			me.processFile(result,name,function(isMod){
 				if (UI) UI.setStatus("Ready");
 
@@ -4124,8 +4222,8 @@ var Tracker = (function(){
 			console.log("extracting zip file");
 
 			if (UI) UI.setStatus("Extracting Zip file",true);
-			// using UZIP: https://github.com/photopea/UZIP.js
 			if (typeof UZIP !== "undefined") {
+				// using UZIP: https://github.com/photopea/UZIP.js
 				var myArchive = UZIP.parse(arrayBuffer);
 				console.log(myArchive);
 				for (var name in myArchive) {
@@ -4133,43 +4231,40 @@ var Tracker = (function(){
 					break; // just use first entry
 				}
 			} else {
-				console.error("no ZIP library found");
-				return false;
-			}
-			/* old ZIP lib, but with worker possibility
-			zip.workerScriptsPath = "script/src/lib/zip/";
-			zip.useWebWorkers = Host.useWebWorkers;
-
-			//ArrayBuffer Reader and Write additions: https://github.com/gildas-lormeau/zip.js/issues/21
-
-			zip.createReader(new zip.ArrayBufferReader(arrayBuffer), function(reader) {
-				var zipEntry;
-				var size = 0;
-				reader.getEntries(function(entries) {
-					if (entries && entries.length){
-						entries.forEach(function(entry){
-							if (entry.uncompressedSize>size){
-								size = entry.uncompressedSize;
-								zipEntry = entry;
-							}
-						});
-					}
-					if (zipEntry){
-						zipEntry.getData(new zip.ArrayBufferWriter,function(data){
-							if (data && data.byteLength) {
-								me.processFile(data,name,next);
-							}
-						})
-					}else{
-						console.error("Zip file could not be read ...");
-						if (next) next(false);
-					}
+				// if UZIP wasn't loaded use zip.js
+				zip.workerScriptsPath = "script/src/lib/zip/";
+				zip.useWebWorkers = Host.useWebWorkers;
+	
+				//ArrayBuffer Reader and Write additions: https://github.com/gildas-lormeau/zip.js/issues/21
+	
+				zip.createReader(new zip.ArrayBufferReader(arrayBuffer), function(reader) {
+					var zipEntry;
+					var size = 0;
+					reader.getEntries(function(entries) {
+						if (entries && entries.length){
+							entries.forEach(function(entry){
+								if (entry.uncompressedSize>size){
+									size = entry.uncompressedSize;
+									zipEntry = entry;
+								}
+							});
+						}
+						if (zipEntry){
+							zipEntry.getData(new zip.ArrayBufferWriter,function(data){
+								if (data && data.byteLength) {
+									me.processFile(data,name,next);
+								}
+							})
+						}else{
+							console.error("Zip file could not be read ...");
+							if (next) next(false);
+						}
+					});
+				}, function(error) {
+					console.error("Zip file could not be read ...");
+					if (next) next(false);
 				});
-			}, function(error) {
-				console.error("Zip file could not be read ...");
-				if (next) next(false);
-			});
-			*/
+			}
 		}
 
 		if (result.isMod && result.loader){
@@ -4234,6 +4329,8 @@ var Tracker = (function(){
 	}
 
 	function resetDefaultSettings(){
+		EventBus.trigger(EVENT.songBPMChangeIgnored,0);
+		EventBus.trigger(EVENT.songSpeedChangeIgnored,0);
 		me.setAmigaSpeed(6);
 		me.setBPM(125);
 
@@ -4247,9 +4344,10 @@ var Tracker = (function(){
 			trackEffectCache.push({});
 		}
 		me.useLinearFrequency = false;
-		me.setTrackerMode(TRACKERMODE.PROTRACKER);
-		Audio.setMasterVolume(1);
+		me.setTrackerMode(TRACKERMODE.PROTRACKER,true);
+		if (!me.isPlugin) Audio.setMasterVolume(1);
 		Audio.setAmigaLowPassFilter(false,0);
+		if (typeof StateManager !== "undefined") StateManager.clear();
 	}
 
 	me.clearEffectCache = function(){
@@ -4275,10 +4373,28 @@ var Tracker = (function(){
 		EventBus.trigger(EVENT.instrumentChange,currentInstrumentIndex);
 	};
 
-	me.setTrackerMode = function(mode){
-		trackerMode = mode;
-        SETTINGS.emulateProtracker1OffsetBug = !me.inFTMode();
-		EventBus.trigger(EVENT.trackerModeChanged,mode);
+	me.setTrackerMode = function(mode,force){
+
+		var doChange = function(){
+			trackerMode = mode;
+			SETTINGS.emulateProtracker1OffsetBug = !me.inFTMode();
+			EventBus.trigger(EVENT.trackerModeChanged,mode);
+		}
+
+		//do some validation when changing from FT to MOD
+		if (mode === TRACKERMODE.PROTRACKER && !force){
+			if (Tracker.getInstruments().length>32){
+				UI.showDialog("WARNING !!!//This file has more than 31 instruments./If you save this file as .MOD, only the first 31 instruments will be included.//Are you sure you want to continue?",function(){
+					doChange();
+				},function(){
+
+				});
+			}else{
+				doChange();
+			}
+		}else{
+			doChange();
+		}
 	};
 	me.getTrackerMode = function(){
 		return trackerMode;
@@ -4562,15 +4678,13 @@ var FileDetector = function(){
 
 	me.detect = function(file,name){
 		var length = file.length;
-
-		var zipId = file.readString(2,0);
-		if (zipId == "PK") return fileType.zip;
-
 		var id = "";
+
 		id = file.readString(17,0);
 		if (id == "Extended Module: "){
 			return fileType.mod_FastTracker;
 		}
+
 
 		if (length>1100){
 			id = file.readString(4,1080); // M.K.
@@ -4606,6 +4720,8 @@ var FileDetector = function(){
 		if (ext == ".iff") return fileType.sample;
 		if (ext == ".zip") return fileType.zip;
 
+		var zipId = file.readString(2,0);
+		if (zipId == "PK") return fileType.zip;
 
 
 
@@ -4660,14 +4776,13 @@ var FileDetector = function(){
 	};
 
 	return me;
-}();
-;
+}();;
 var ProTracker = function(){
 	var me = {};
 
 	me.load = function(file,name){
 
-		Tracker.setTrackerMode(TRACKERMODE.PROTRACKER);
+		Tracker.setTrackerMode(TRACKERMODE.PROTRACKER,true);
         Tracker.useLinearFrequency = false;
         Tracker.clearInstruments(31);
 
@@ -4714,6 +4829,7 @@ var ProTracker = function(){
 
 			instrument.sample.length = instrument.sample.realLen = sampleLength << 1;
 			var finetune = file.readUbyte();
+			if (finetune>16) finetune = finetune%16;
 			if (finetune>7) finetune -= 16;
 			instrument.setFineTune(finetune);
 			instrument.sample.volume   = file.readUbyte();
@@ -4727,9 +4843,11 @@ var ProTracker = function(){
 			sampleDataOffset += instrument.sample.length;
 			instrument.setSampleIndex(0);
 			Tracker.setInstrument(i,instrument);
+
 			
 		}
 		song.instruments = Tracker.getInstruments();
+
 
 		file.goto(950);
 		song.length = file.readUbyte();
@@ -4865,19 +4983,24 @@ var ProTracker = function(){
 
 		fileSize += ((highestPattern+1)* (trackCount * 256));
 
-		instruments.forEach(function(instrument){
-			if (instrument){
+		if (Tracker.getInstruments().length>32){
+			UI.showDialog("WARNING !!!//This file has more than 31 instruments.//Only the first 31 instruments will be included.");
+		}
+		var startI = 1;
+		var endI = 31;
+		var i;
 
+		for (i = startI;i<=endI;i++){
+			var instrument = instruments[i];
+			if (instrument){
 				// reset to first sample in case we come from a XM file
 				instrument.setSampleIndex(0);
-
 				fileSize += instrument.sample.length;
 			}else{
 				// +4 ?
 			}
-		});
+		}
 
-		var i;
 		var arrayBuffer = new ArrayBuffer(fileSize);
 		var file = new BinaryStream(arrayBuffer,true);
 
@@ -4885,9 +5008,9 @@ var ProTracker = function(){
 		file.writeStringSection(song.title,20);
 
 		// write instrument data
-		instruments.forEach(function(instrument){
+		for (i = startI;i<=endI;i++){
+			var instrument = instruments[i];
 			if (instrument){
-
 				// limit instrument size to 128k
 				//TODO: show a warning when this is exceeded ...
 				instrument.sample.length = Math.min(instrument.sample.length, 131070); // = FFFF * 2
@@ -4901,7 +5024,8 @@ var ProTracker = function(){
 			}else{
 				file.clear(30);
 			}
-		});
+		}
+
 
 		file.writeUByte(song.length);
 		file.writeUByte(127);
@@ -4918,46 +5042,50 @@ var ProTracker = function(){
 
 		for (i=0;i<=highestPattern;i++){
 
-			// TODO: patternData
-			//file.clear(1024);
-
 			var patternData = song.patterns[i];
 
-			// TODO - should be patternLength of pattnern;
+			// TODO - should be patternLength of pattern;
 			for (var step = 0; step<patternLength; step++){
 				var row = patternData[step];
 				for (var channel = 0; channel < trackCount; channel++){
-					var trackStep = row[channel];
-					var uIndex = 0;
-					var lIndex = trackStep.instrument;
+					if (row){
+						var trackStep = row[channel];
+						var uIndex = 0;
+						var lIndex = trackStep.instrument;
 
-					if (lIndex>15){
-						uIndex = 16; // TODO: Why is this 16 and not 1 ? Nobody wanted 255 instruments instead of 31 ?
-						lIndex = trackStep.instrument - 16;
+						if (lIndex>15){
+							uIndex = 16; // TODO: Why is this 16 and not 1 ? Nobody wanted 255 instruments instead of 31 ?
+							lIndex = trackStep.instrument - 16;
+						}
+
+						var v = (uIndex << 24) + (trackStep.period << 16) + (lIndex << 12) + (trackStep.effect << 8) + trackStep.param;
+						file.writeUint(v);
+					}else{
+						file.writeUint(0);
 					}
 
-					var v = (uIndex << 24) + (trackStep.period << 16) + (lIndex << 12) + (trackStep.effect << 8) + trackStep.param;
-					file.writeUint(v);
 				}
 			}
 		}
 
 		// sampleData;
-		instruments.forEach(function(instrument){
+		for (i = startI;i<=endI;i++){
+			var instrument = instruments[i];
 			if (instrument && instrument.sample.data && instrument.sample.length){
 				// should we put repeat info here?
-				file.clear(2);
+				//file.clear(2);
 				var d;
 				// instrument length is in word
-				for (i = 0; i < instrument.sample.length-2; i++){
-					d = instrument.sample.data[i] || 0;
+				for (var j = 0; j < instrument.sample.length; j++){
+					d = instrument.sample.data[j] || 0;
 					file.writeByte(Math.round(d*127));
 				}
 				console.log("write instrument with " + instrument.sample.length + " length");
 			}else{
 				// still write 4 bytes?
 			}
-		});
+		}
+
 
 		if (next) next(file);
 	};
@@ -4970,7 +5098,7 @@ var SoundTracker = function(){
 
 	me.load = function(file,name){
 
-		Tracker.setTrackerMode(TRACKERMODE.PROTRACKER);
+		Tracker.setTrackerMode(TRACKERMODE.PROTRACKER,true);
         Tracker.useLinearFrequency = false;
 		Tracker.clearInstruments(15);
 
@@ -5100,7 +5228,7 @@ var FastTracker = function(){
     me.load = function(file,name){
 
         console.log("loading FastTracker");
-        Tracker.setTrackerMode(TRACKERMODE.FASTTRACKER);
+        Tracker.setTrackerMode(TRACKERMODE.FASTTRACKER,true);
 		Tracker.clearInstruments(1);
 
         var mod = {};
@@ -5964,7 +6092,7 @@ var Instrument = function(){
 			me.sample.finetuneX = finetune;
 			me.sample.finetune = finetune >> 4;
 		}else{
-            if (finetune>7) finetune = finetune-15;
+            if (finetune>7) finetune = finetune-16;
 			me.sample.finetune = finetune;
 			me.sample.finetuneX = finetune << 4;
 		}
@@ -6119,8 +6247,24 @@ return {
         isPlaying: Tracker.isPlaying,
         getTrackCount: Tracker.getTrackCount,
         getSong: Tracker.getSong,
+        getInstruments: Tracker.getInstruments,
         getStateAtTime: Tracker.getStateAtTime,
+        getTimeStates: Tracker.getTimeStates,
         setCurrentSongPosition: Tracker.setCurrentSongPosition,
+        setBPM: Tracker.setBPM,
+        getBPM: Tracker.getBPM,
+        setAmigaSpeed: Tracker.setAmigaSpeed,
+        getAmigaSpeed: Tracker.getAmigaSpeed,
+        setMaster: Tracker.setMaster,
+        isMaster: Tracker.isMaster,
         audio: Audio
     };
-})();
+});
+
+
+if (typeof HostBridge === "undefined" || !HostBridge.customConfig){
+    BassoonTracker = BassoonTracker();
+}
+
+
+
