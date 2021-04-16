@@ -9,6 +9,9 @@
     <meta name="mobile-web-app-capable" content="yes">
 
     <script src="bundle.js"></script>
+    <!--
+    <script src="b-min.js"></script>
+  -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             BassoonTracker.init(true);
@@ -16,7 +19,7 @@
             //if (!Audio.context){
             //    alert("Sorry\nYour browser does not support WebAudio\nSupported browsers are\nChrome, Firefox, Safari, and Edge");
             //}else{
-                BassoonTracker.load("../demomods/StardustMemories.zip",false,function(){
+                BassoonTracker.load("../demomods/StardustMemories.mod",false,function(){
                     setTimeout(BassoonTracker.playSong,100);
                 });
             //}
