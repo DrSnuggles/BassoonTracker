@@ -8,6 +8,7 @@ module.exports = function(grunt) {
             },
             tracker:{
                 src: [
+                    'script/src/lib/UZIP.depacker_pack_20200308.js',
                     'script/wrapper/start.txt',
                     'script/src/enum.js',
                     'script/src/eventBus.js',
