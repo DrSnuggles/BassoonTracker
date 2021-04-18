@@ -197,7 +197,7 @@
 <div id="playlist">
     <h2>Playlist</h2>
    <ul>
-       <li onclick="play('../demomods/StardustMemories.mod')">Stardust Memories</li>
+       <li onclick="play('../demomods/StardustMemories.zip')">Stardust Memories</li>
        <li onclick="play('../demomods/GSLINGER.MOD')">Guitar Slinger</li>
        <li onclick="play('../demomods/Ambrozia.xm')">Ambrozia</li>
        <li onclick="play('../demomods/Deadlock.xm')">Deadlock</li>
@@ -207,7 +207,8 @@
 </div>
 
 
-<script src="bassoonplayer-min.js?v20210322"></script>
+<!--<script src="bassoonplayer-min.js?v20210322"></script>-->
+<script src="b-zip.js"></script>
 <script src="../script/src/enum.js"></script>
 <script>
     var playItem;
@@ -284,7 +285,7 @@
 			songName.innerHTML = "Sorry<br>Your browser does not support WebAudio.<br>Supported browsers are Chrome, Firefox, Safari, and Edge";
 		}else{
 
-			var demoMod = "../demomods/StardustMemories.mod";
+			var demoMod = "../demomods/StardustMemories.zip";
 
 			var startTime;
 			var wasPlaying;
@@ -465,7 +466,7 @@
                 }
             }
 
-            noteString += " " + formatHex(note.instrument,2,"0");
+            noteString += " " + formatHex(note._u,2,"0");
 
             var effectString;
             if (note.effect>15){
@@ -474,7 +475,7 @@
                 effectString = formatHex(note.effect);
             }
 
-            effectString += formatHex(note.param,2,"0");
+            effectString += formatHex(note._i,2,"0");
             if (effectString === "000")effectString = "...";
 
             noteString += " " + effectString;
